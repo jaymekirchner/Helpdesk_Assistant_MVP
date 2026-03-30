@@ -3,7 +3,7 @@ import sys
 from dotenv import load_dotenv
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
-import openai
+from openai import AzureOpenAI  # ✅ Clean import, new SDK style only
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,15 +18,6 @@ OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 OPENAI_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
 
-# # print all env vars for debugging
-# print("Environment Variables:")
-# print(f"SEARCH_ENDPOINT: {SEARCH_ENDPOINT}")
-# print(f"SEARCH_KEY: {'***' if SEARCH_KEY else None}")
-# print(f"SEARCH_INDEX: {SEARCH_INDEX}")  
-# print(f"OPENAI_ENDPOINT: {OPENAI_ENDPOINT}")
-# print(f"OPENAI_KEY: {'***' if OPENAI_KEY else None}")
-# print(f"OPENAI_DEPLOYMENT: {OPENAI_DEPLOYMENT}")
-
 # Validate environment variables
 if not all([SEARCH_ENDPOINT, SEARCH_KEY, SEARCH_INDEX, OPENAI_ENDPOINT, OPENAI_KEY, OPENAI_DEPLOYMENT]):
     print("Missing required environment variables. Please check your .env file.")
@@ -39,11 +30,12 @@ search_client = SearchClient(
     credential=AzureKeyCredential(SEARCH_KEY)
 )
 
-# Initialize OpenAI client
-openai.api_type = "azure"
-openai.api_base = OPENAI_ENDPOINT
-openai.api_key = OPENAI_KEY
-openai.api_version = "2024-02-15-preview"
+# ✅ Initialize AzureOpenAI client ONCE at module level (new SDK style only)
+openai_client = AzureOpenAI(
+    api_key=OPENAI_KEY,
+    api_version="2024-02-15-preview",
+    azure_endpoint=OPENAI_ENDPOINT
+)
 
 def get_search_results(query, top_k=3):
     """
@@ -54,13 +46,11 @@ def get_search_results(query, top_k=3):
         results = search_client.search(query, top=top_k)
         docs = []
         for doc in results:
-            # Try to extract content from common fields
             for field in ["content", "text", "chunk", "chunk_text"]:
                 if field in doc and doc[field]:
                     docs.append(doc[field])
                     break
             else:
-                # Fallback: add stringified doc
                 docs.append(str(doc))
         return docs
     except Exception as e:
@@ -72,39 +62,36 @@ def get_grounded_answer(question, context_docs):
     Send context and question to Azure OpenAI and return the answer.
     """
     context = "\n---\n".join(context_docs)
-    prompt = f"""
-You are an AI assistant. Use ONLY the provided context to answer the user's question. If the answer is not in the context, say you don't know.
 
-Context:
-{context}
+    # ✅ System message carries the grounding instruction
+    system_message = (
+        "You are a helpful IT helpdesk assistant. Answer the user's question using ONLY using the context provided below. If the answer cannot be found in the context, say 'I don't have enough information to answer that based on the available documents.'\n\n"
+        f"Context:\n{context}"
+    )
 
-Question: {question}
-Answer:"""
     try:
-        client = openai.AzureOpenAI(
-            api_key=OPENAI_KEY,
-            api_version="2024-02-15-preview",
-            azure_endpoint=OPENAI_ENDPOINT
-        )
-        response = client.chat.completions.create(
+        print(f"\n[DEBUG] Calling deployment: {OPENAI_DEPLOYMENT}")  # ✅ visibility
+        response = openai_client.chat.completions.create(
             model=OPENAI_DEPLOYMENT,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": question}  # ✅ clean, just the question
             ],
             temperature=0.2,
             max_tokens=512
         )
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
+        print(f"[DEBUG] Raw response received, length: {len(answer)} chars")  # ✅ visibility
+        return answer
     except Exception as e:
-        return f"Error from OpenAI: {e}"
+        return f"Error from OpenAI: {e}"  # ✅ will now surface real errors
 
 def main():
     print("Azure RAG MVP (no LangChain)")
     print("Type your question (or 'exit' to quit):")
     while True:
         question = input("\n> ").strip()
-        if question.lower() in ("exit", "quit"): 
+        if question.lower() in ("exit", "quit"):
             print("Goodbye!")
             break
         if not question:
