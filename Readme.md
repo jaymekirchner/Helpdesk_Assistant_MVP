@@ -6,15 +6,15 @@ Steps:
 - First create a file ".env" 
 - Within the .env file, add the following information
 
-AZURE_OPENAI_ENDPOINT = "https://ai-bootcamp-openai-pod2.openai.azure.com/"
-AZURE_OPENAI_API_KEY = "******"
-AZURE_OPENAI_DEPLOYMENT = "text-embedding-3-small"
-AZURE_OPENAI_API_VERSION = "2024-02-01"
+  - AZURE_OPENAI_ENDPOINT = "https://ai-bootcamp-openai-pod2.openai.azure.com/"
+  - AZURE_OPENAI_API_KEY = "******"
+  - AZURE_OPENAI_DEPLOYMENT = "gpt-4o-mini"
+  - AZURE_OPENAI_API_VERSION = "2024-02-01"
 
 
-AZURE_SEARCH_ENDPOINT = "https://ai-bootcamp-search-pod2.search.windows.net"
-AZURE_SEARCH_KEY = "******"
-AZURE_SEARCH_INDEX = "rag-1774655785839"
+  - AZURE_SEARCH_ENDPOINT = "https://ai-bootcamp-search-pod2.search.windows.net"
+  - AZURE_SEARCH_KEY = "******"
+  - AZURE_SEARCH_INDEX = "rag-1774655785839"
 
 - Note that AZURE_SEARCH_INDEX is subject to change.
   
