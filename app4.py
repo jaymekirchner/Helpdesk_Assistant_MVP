@@ -16,6 +16,8 @@ from openai import AzureOpenAI
 from agent_framework import tool
 from agent_framework.openai import OpenAIChatCompletionClient
 
+from tool_data import Tools
+
 load_dotenv()
 
 SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
@@ -107,41 +109,6 @@ openai_client = AzureOpenAI(
     azure_endpoint=OPENAI_ENDPOINT
 )
 
-# ============================================================
-# MOCK TOOL DATA
-# ============================================================
-MOCK_USERS = {
-    "jdoe": {
-        "username": "jdoe",
-        "name": "John Doe",
-        "department": "Finance",
-        "email": "jdoe@company.com",
-        "device_id": "LAPTOP-1001",
-    },
-    "asmith": {
-        "username": "asmith",
-        "name": "Alice Smith",
-        "department": "HR",
-        "email": "asmith@company.com",
-        "device_id": "LAPTOP-1002",
-    },
-}
-
-MOCK_DEVICES = {
-    "LAPTOP-1001": {
-        "device_id": "LAPTOP-1001",
-        "status": "online",
-        "vpn_client": "installed",
-        "last_seen": "2026-03-31 08:15",
-    },
-    "LAPTOP-1002": {
-        "device_id": "LAPTOP-1002",
-        "status": "offline",
-        "vpn_client": "unknown",
-        "last_seen": "2026-03-30 19:42",
-    },
-}
-
 
 def _write_ticket(ticket_record):
     with TICKETS_FILE.open("a", encoding="utf-8") as fp:
@@ -157,7 +124,7 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example jdoe")]
 ) -> str:
-    user = MOCK_USERS.get(username.lower())
+    user = Tools.MOCK_USERS.get(username.lower())
     if not user:
         return f"No user found for username '{username}'."
 
@@ -178,7 +145,7 @@ def lookup_user(
 def check_device_status(
     device_id: Annotated[str, Field(description="Device ID, for example LAPTOP-1001")]
 ) -> str:
-    device = MOCK_DEVICES.get(device_id.upper())
+    device = Tools.MOCK_DEVICES.get(device_id.upper())
     if not device:
         return f"No device found for device ID '{device_id}'."
 
