@@ -1,3 +1,4 @@
 azure-search-documents
 openai
 python-dotenv
+semantic-kernel>=1.0.0
