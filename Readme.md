@@ -34,3 +34,31 @@ Steps:
 
 - Run the file with "python app.py" in your TERMINAL
  
+------------------------------------------------------------------------------------------------------
+HOW TO SET UP THE MCP SERVER 
+------------------------------------------------------------------------------------------------------
+
+1. Check if Node.js is installed:
+bashnode --version
+npm --version
+npx --version
+If any of those fail, install Node.js:
+
+2. Install Node.js (pick your OS):
+macOS:
+bashbrew install node
+Ubuntu/Debian:
+bashcurl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt-get install -y nodejs
+Windows: Download the installer from nodejs.org
+
+3. If Node IS installed but npx still isn't found, it's a PATH issue. Find where npx lives and add it:
+bashwhich npx          # or: whereis npx
+Then add it to your shell config (~/.bashrc, ~/.zshrc, etc.):
+bashexport PATH="/path/to/node/bin:$PATH"
+source ~/.zshrc    # or ~/.bashrc
+
+4. Then retry:
+bashmcp dev server.py
+
+Restart your terminal after any install — that's the most commonly missed step. The MCP CLI needs npx on the PATH in the same shell session where you're running it.
