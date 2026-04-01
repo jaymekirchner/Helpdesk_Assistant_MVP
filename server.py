@@ -4,7 +4,21 @@ from typing import *
 from app5_ma_experimental import *
 import requests
 
-mcp = FastMCP("IT Helpdesk Tools")
+mcp = FastMCP("Pod2")
+# Add a resource
+@mcp.resource("greeting://{name}")
+
+def get_greeting(name: str) -> str:
+    """Get a personalized greeting."""
+    return f"Hello, {name}!"
+
+# Add a prompt
+@mcp.prompt()
+def review_prompt(code: str) -> str:
+    """Generate a code review prompt."""
+    return f"Please review this code:\n\n{code}"
+
+
 
 @mcp.tool()
 def lookup_user(
@@ -22,6 +36,9 @@ def lookup_user(
         f"- Email: {user['email']}\n"
         f"- Device ID: {user['device_id']}"
     )
+if __name__ == "__main__":
+    mcp.run()
+
 
 @mcp.tool()
 def check_device_status(
@@ -91,3 +108,5 @@ def _write_ticket(ticket_record):
 
 if __name__ == "__main__":
     mcp.run()  # defaults to stdio transport
+# if __name__ == "__main__":
+#     mcp.run()  # defaults to stdio transport
