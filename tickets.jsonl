@@ -1,0 +1,2 @@
+{"ticket_id": "TCK-7EDDDB03", "created_at_utc": "2026-04-02T14:28:15.124955+00:00", "status": "Open", "assignment_group": "IT Service Desk", "user": "jdoe", "issue": "Test issue from MCP bridge", "category": "VPN", "severity": "Low", "impacted_system": "GlobalProtect"}
+{"ticket_id": "TCK-CAC7F679", "created_at_utc": "2026-04-02T14:29:33.719745+00:00", "status": "Open", "assignment_group": "IT Service Desk", "user": "jdoe", "issue": "VPN keeps disconnecting", "category": "VPN", "severity": "Medium", "impacted_system": "VPN"}

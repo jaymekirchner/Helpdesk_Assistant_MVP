@@ -37,7 +37,7 @@ def lookup_user(
         f"- Device ID: {user['device_id']}"
     )
 if __name__ == "__main__":
-    mcp.run()
+    pass
 
 
 @mcp.tool()
@@ -108,5 +108,3 @@ def _write_ticket(ticket_record):
 
 if __name__ == "__main__":
     mcp.run()  # defaults to stdio transport
-# if __name__ == "__main__":
-#     mcp.run()  # defaults to stdio transport

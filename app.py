@@ -41,7 +41,16 @@ ESCALATION_TRIGGERS = [
 ESCALATION_SUFFIX = "\n\n⚠️ Please contact IT support if the issue persists."
 
 if not all([SEARCH_ENDPOINT, SEARCH_KEY, SEARCH_INDEX, OPENAI_ENDPOINT, OPENAI_KEY, OPENAI_DEPLOYMENT]):
-    print("Missing required environment variables. Please check your .env file.")
+    # add print statement to know which variables are missing
+    missing_vars = [var for var, value in {
+        "AZURE_SEARCH_ENDPOINT": SEARCH_ENDPOINT,
+        "AZURE_SEARCH_KEY": SEARCH_KEY,
+        "AZURE_SEARCH_INDEX": SEARCH_INDEX,
+        "AZURE_OPENAI_ENDPOINT": OPENAI_ENDPOINT,
+        "AZURE_OPENAI_API_KEY": OPENAI_KEY,
+        "AZURE_OPENAI_DEPLOYMENT": OPENAI_DEPLOYMENT
+    }.items() if not value]
+    print(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your .env file.")
     sys.exit(1)
 
 search_client = SearchClient(

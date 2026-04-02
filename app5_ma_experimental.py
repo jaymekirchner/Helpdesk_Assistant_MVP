@@ -4,6 +4,7 @@ import json
 import asyncio
 import uuid
 import re
+import threading
 from typing import Annotated
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,8 @@ import requests
 
 from agent_framework import tool
 from agent_framework.openai import OpenAIChatCompletionClient
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client, StdioServerParameters
 from tool_data import Tools
 load_dotenv()
 
@@ -33,6 +36,8 @@ HISTORY_LIMIT = 12
 KNOWLEDGE_TOP_K = 10
 TICKETS_FILE = Path("tickets.jsonl")
 POST_URL = "https://1121c538-16ba-44b5-a5c9-d5319443f585.mock.pstmn.io/post"
+MCP_SERVER_PATH = Path(__file__).with_name("server.py")
+MCP_SERVER_PYTHON = os.getenv("MCP_SERVER_PYTHON", sys.executable)
 
 ESCALATION_TRIGGERS = [
     "i don't know based on the knowledge base",
@@ -192,6 +197,68 @@ def _write_ticket(ticket_record):
     with TICKETS_FILE.open("a", encoding="utf-8") as fp:
         fp.write(json.dumps(ticket_record) + "\n")
 
+
+def _run_coro_sync(coro):
+    """Run async MCP calls from sync tool functions, even when an event loop is active."""
+    try:
+        asyncio.get_running_loop()
+        loop_running = True
+    except RuntimeError:
+        loop_running = False
+
+    if not loop_running:
+        return asyncio.run(coro)
+
+    result = {}
+    error = {}
+
+    def runner():
+        try:
+            result["value"] = asyncio.run(coro)
+        except Exception as exc:
+            error["value"] = exc
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")
+
+
+async def _call_mcp_tool_async(tool_name: str, arguments: dict) -> str:
+    server_params = StdioServerParameters(
+        command=MCP_SERVER_PYTHON,
+        args=[str(MCP_SERVER_PATH)]
+    )
+    async with stdio_client(server_params) as (reader, writer):
+        async with ClientSession(reader, writer) as session:
+            await session.initialize()
+            response = await session.call_tool(tool_name, arguments)
+
+    if getattr(response, "isError", False):
+        return f"MCP tool '{tool_name}' failed."
+
+    if getattr(response, "structuredContent", None):
+        value = response.structuredContent.get("result")
+        if isinstance(value, str):
+            return value
+
+    content = getattr(response, "content", None) or []
+    text_chunks = [getattr(chunk, "text", "") for chunk in content if getattr(chunk, "type", "") == "text"]
+    if text_chunks:
+        return "\n".join(part for part in text_chunks if part)
+
+    return "No result returned from MCP tool."
+
+
+def _call_mcp_tool(tool_name: str, arguments: dict) -> str:
+    try:
+        return _run_coro_sync(_call_mcp_tool_async(tool_name, arguments))
+    except Exception as e:
+        return f"MCP call failed for '{tool_name}': {e}"
+
 # ============================================================
 # MAF TOOLS
 # ============================================================
@@ -202,18 +269,7 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example jdoe")]
 ) -> str:
-    user = Tools.MOCK_USERS.get(username.lower())
-    if not user:
-        return f"No user found for username '{username}'."
-
-    return (
-        f"User found:\n"
-        f"- Username: {user['username']}\n"
-        f"- Name: {user['name']}\n"
-        f"- Department: {user['department']}\n"
-        f"- Email: {user['email']}\n"
-        f"- Device ID: {user['device_id']}"
-    )
+    return _call_mcp_tool("lookup_user", {"username": username})
 
 
 @tool(
@@ -223,17 +279,7 @@ def lookup_user(
 def check_device_status(
     device_id: Annotated[str, Field(description="Device ID, for example LAPTOP-1001")]
 ) -> str:
-    device = Tools.MOCK_DEVICES.get(device_id.upper())
-    if not device:
-        return f"No device found for device ID '{device_id}'."
-
-    return (
-        f"Device status:\n"
-        f"- Device ID: {device['device_id']}\n"
-        f"- Status: {device['status']}\n"
-        f"- VPN Client: {device['vpn_client']}\n"
-        f"- Last Seen: {device['last_seen']}"
-    )
+    return _call_mcp_tool("check_device_status", {"device_id": device_id})
 
 
 @tool(
@@ -247,40 +293,15 @@ def create_ticket(
     severity: Annotated[str, Field(description="Business impact severity: Low, Medium, High, Critical")] = "Medium",
     impacted_system: Annotated[str, Field(description="Impacted application or system")]= "Unknown",
 ) -> str:
-    ticket_id = f"TCK-{uuid.uuid4().hex[:8].upper()}"
-    record = {
-        "ticket_id": ticket_id,
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "Open",
-        "assignment_group": "IT Service Desk",
-        "user": user,
-        "issue": issue,
-        "category": category,
-        "severity": severity,
-        "impacted_system": impacted_system,
-    }
-    _write_ticket(record)
-
-    # Post the ticket record to the external URL
-    try:
-        response = requests.post(POST_URL, json=record)
-        if response.status_code == 200:
-            pass
-        else:
-            print(f"{response.status_code} [DEBUG] Failed to post ticket {ticket_id}: {response.text}")
-    except Exception as e:
-        print(f"[DEBUG] Error posting ticket {ticket_id}: {e}")
-
-    return (f"{response.status_code} [DEBUG] Ticket {ticket_id} posted successfully to {POST_URL}"
-        f"Ticket created successfully.\n"
-        f"- Ticket ID: {ticket_id}\n"
-        f"- User: {user}\n"
-        f"- Issue: {issue}\n"
-        f"- Category: {category}\n"
-        f"- Severity: {severity}\n"
-        f"- Impacted System: {impacted_system}\n"
-        f"- Status: Open\n"
-        f"- Assignment Group: IT Service Desk"
+    return _call_mcp_tool(
+        "create_ticket",
+        {
+            "issue": issue,
+            "user": user,
+            "category": category,
+            "severity": severity,
+            "impacted_system": impacted_system,
+        }
     )
 
 
