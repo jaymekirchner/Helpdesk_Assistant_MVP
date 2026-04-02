@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import the main logic from the MCP-enabled app5 module
-from app5_ma_experimental import handle_user_message
+from appFinal import handle_user_message
 
 # Set page configuration
 st.set_page_config(
