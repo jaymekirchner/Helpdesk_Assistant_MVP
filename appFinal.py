@@ -43,8 +43,22 @@ from openai import AzureOpenAI
 
 from agent_framework import tool
 from agent_framework.openai import OpenAIChatCompletionClient
+from tool_data import Tools
 
 
+def _configure_console_encoding() -> None:
+    """Configure console streams for UTF-8 output when the runtime supports it."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+
+_configure_console_encoding()
 load_dotenv()
 
 SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
@@ -137,6 +151,7 @@ def create_ticket(
     import concurrent.futures
 
     async def _call():
+        """Send the ticket creation request to the MCP server."""
         client = Client("http://localhost:8000/mcp")
         async with client:
             result = await client.call_tool(
@@ -231,6 +246,7 @@ openai_client = AzureOpenAI(
 
 
 def _write_ticket(ticket_record):
+    """Append a ticket record to the local JSONL ticket log."""
     with TICKETS_FILE.open("a", encoding="utf-8") as fp:
         fp.write(json.dumps(ticket_record) + "\n")
 
@@ -244,6 +260,7 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example jdoe")]
 ) -> str:
+    """Return mock directory details for a known corporate username."""
     user = Tools.MOCK_USERS.get(username.lower())
     if not user:
         return f"No user found for username '{username}'."
@@ -265,6 +282,7 @@ def lookup_user(
 def check_device_status(
     device_id: Annotated[str, Field(description="Device ID, for example LAPTOP-1001")]
 ) -> str:
+    """Return mock status information for a known managed device."""
     device = Tools.MOCK_DEVICES.get(device_id.upper())
     if not device:
         return f"No device found for device ID '{device_id}'."
@@ -297,6 +315,7 @@ def create_ticket(
     import concurrent.futures
 
     async def _call():
+        """Send the full ticket payload to the MCP server."""
         client = Client("http://localhost:8000/mcp")
         async with client:
             result = await client.call_tool(
@@ -329,6 +348,7 @@ def create_ticket(
 def search_knowledge_base(
     query: Annotated[str, Field(description="Concise keyword search query describing the IT issue")]
 ) -> str:
+    """Query Azure AI Search for troubleshooting documents matching the user issue."""
     try:
         results = search_client.search(query, top=5)
         docs = []
@@ -388,6 +408,7 @@ action_agent = OpenAIChatCompletionClient(
 # ════════════════════════════════════════════════════
 
 def build_retrieval_query(user_input, conversation_history):
+    """Build a search-friendly query from the latest message and recent conversation context."""
     if not conversation_history:
         print(f"[DEBUG] No history — using raw query: {user_input}")
         return user_input
@@ -436,6 +457,7 @@ def build_retrieval_query(user_input, conversation_history):
 # ════════════════════════════════════════════════════
 
 def get_search_results(query, top_k=5):
+    """Fetch relevant knowledge base chunks from Azure AI Search."""
     try:
         results = search_client.search(query, top=top_k)
         docs = []
@@ -471,6 +493,7 @@ def docs_contain_error_code(docs, error_code):
 # ════════════════════════════════════════════════════
 
 def is_query_vague(question, conversation_history):
+    """Ask the model whether the current support request needs clarification."""
     system_message = (
         "You are an IT support triage assistant. Decide if the user's question "
         "is too vague to answer without more detail.\n\n"
@@ -515,6 +538,7 @@ def is_query_vague(question, conversation_history):
 # ════════════════════════════════════════════════════
 
 def build_system_prompt(context_docs):
+    """Assemble the grounded system prompt from retrieved knowledge base documents."""
     numbered_docs = "\n\n".join(
         f"[Document {i}]\n{doc.strip()}"
         for i, doc in enumerate(context_docs, 1)
@@ -544,6 +568,7 @@ def build_system_prompt(context_docs):
 
 
 def get_grounded_answer(question, context_docs, conversation_history):
+    """Generate a document-grounded response using the retrieved support content."""
     system_prompt = build_system_prompt(context_docs)
 
     messages = [
@@ -569,6 +594,7 @@ def get_grounded_answer(question, context_docs, conversation_history):
 # ════════════════════════════════════════════════════
 
 def check_escalation(answer):
+    """Determine whether the assistant response should include an escalation message."""
     answer_lower = answer.lower()
 
     keyword_hit = any(trigger in answer_lower for trigger in ESCALATION_TRIGGERS)
@@ -617,16 +643,19 @@ def check_escalation(answer):
 # ════════════════════════════════════════════════════
 
 def looks_like_tool_request(user_input):
+    """Detect whether the user is explicitly asking for an operational tool action."""
     msg = user_input.lower()
     return any(signal in msg for signal in TOOL_REQUEST_SIGNALS)
 
 
 def looks_like_ticket_request(user_input):
+    """Detect whether the user is explicitly asking to create or escalate a ticket."""
     msg = user_input.lower()
     return any(signal in msg for signal in TICKET_REQUEST_SIGNALS)
 
 
 def looks_like_ticket_confirmation(user_input):
+    """Detect whether the user is confirming a previously offered ticket creation step."""
     msg = user_input.strip().lower()
     return any(msg == signal or msg.startswith(signal) for signal in TICKET_CONFIRMATION_SIGNALS)
 
@@ -853,6 +882,7 @@ def build_ticket_prompt(ctx):
 
 
 async def handle_user_message(user_input, conversation_history):
+    """Process one user turn and return the assistant response plus persistence flag."""
     print("\n[Agent Controller] Evaluating message...")
 
     # Pre-check: ticket confirmation following a prior escalation offer
@@ -919,6 +949,7 @@ async def handle_user_message(user_input, conversation_history):
 # ════════════════════════════════════════════════════
 
 async def main():
+    """Run the interactive CLI loop for the helpdesk assistant."""
     print("═" * 76)
     print("  Azure RAG IT Support Agent + Microsoft Agent Framework")
     print("  Memory ✓  Clarification ✓  Multi-Turn ✓  Escalation ✓  Orchestrator ✓")
