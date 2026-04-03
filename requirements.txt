@@ -7,3 +7,4 @@ requests
 streamlit
 agent_framework
 fastmcp
+psycopg2
