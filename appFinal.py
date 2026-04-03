@@ -207,7 +207,7 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example john.doe")]
 ) -> str:
-    postgres_conn_string = "dbname=postgres user=ithelpdesk_pod2_admin password=pwc-ai-bootcamp-p2-pw port=5432 host=ithelpdesk-pod2-postgres-db.postgres.database.azure.com" #os.getenv("POSTGRES_CONNECTION_STRING")
+    postgres_conn_string = os.getenv("POSTGRES_CONNECTION_STRING")
     if not postgres_conn_string:
         return "Error: POSTGRES_CONNECTION_STRING environment variable not set."
     
