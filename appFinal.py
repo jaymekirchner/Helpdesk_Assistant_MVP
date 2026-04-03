@@ -26,39 +26,17 @@ import os
 import sys
 import json
 import asyncio
-
-import os
-import sys
-import json
-import asyncio
 from typing import Annotated
 from pathlib import Path
-import requests
-
 from dotenv import load_dotenv
 from pydantic import Field
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 from openai import AzureOpenAI
-
 from agent_framework import tool
 from agent_framework.openai import OpenAIChatCompletionClient
 from tool_data import Tools
 
-
-def _configure_console_encoding() -> None:
-    """Configure console streams for UTF-8 output when the runtime supports it."""
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        if stream is None or not hasattr(stream, "reconfigure"):
-            continue
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-
-
-_configure_console_encoding()
 load_dotenv()
 
 SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
@@ -135,37 +113,6 @@ TICKET_CONFIRMATION_SIGNALS = [
     "okay"
 ]
 
-@tool(
-    name="create_ticket",
-    description="Create an IT support ticket when the issue is unresolved or the user asks to open a ticket."
-)
-def create_ticket(
-    issue: Annotated[str, Field(description="The unresolved IT issue")],
-    user: Annotated[str, Field(description="Username or identifier of the user")] = "unknown",
-) -> str:
-    """
-    Calls the FastMCP server's create_ticket tool via MCP HTTP transport.
-    """
-    from fastmcp import Client
-    import asyncio
-    import concurrent.futures
-
-    async def _call():
-        """Send the ticket creation request to the MCP server."""
-        client = Client("http://localhost:8000/mcp")
-        async with client:
-            result = await client.call_tool(
-                "create_ticket",
-                {"issue": issue, "user": user},
-            )
-            return str(result)
-
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(asyncio.run, _call()).result()
-        return result
-    except Exception as e:
-        return f"Error calling FastMCP server: {e}"
 MAF_TRIAGE_INSTRUCTIONS = (
     "You are an IT Helpdesk triage agent.\n\n"
     "Your job is to read the user's request and conversation history, classify the issue, "
@@ -246,7 +193,6 @@ openai_client = AzureOpenAI(
 
 
 def _write_ticket(ticket_record):
-    """Append a ticket record to the local JSONL ticket log."""
     with TICKETS_FILE.open("a", encoding="utf-8") as fp:
         fp.write(json.dumps(ticket_record) + "\n")
 
@@ -260,7 +206,6 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example jdoe")]
 ) -> str:
-    """Return mock directory details for a known corporate username."""
     user = Tools.MOCK_USERS.get(username.lower())
     if not user:
         return f"No user found for username '{username}'."
@@ -282,7 +227,6 @@ def lookup_user(
 def check_device_status(
     device_id: Annotated[str, Field(description="Device ID, for example LAPTOP-1001")]
 ) -> str:
-    """Return mock status information for a known managed device."""
     device = Tools.MOCK_DEVICES.get(device_id.upper())
     if not device:
         return f"No device found for device ID '{device_id}'."
@@ -315,7 +259,6 @@ def create_ticket(
     import concurrent.futures
 
     async def _call():
-        """Send the full ticket payload to the MCP server."""
         client = Client("http://localhost:8000/mcp")
         async with client:
             result = await client.call_tool(
@@ -328,42 +271,26 @@ def create_ticket(
                     "impacted_system": impacted_system,
                 },
             )
-            return str(result)
+            return result  # return raw list of content objects
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             result = pool.submit(asyncio.run, _call()).result()
-        return result
+        # Persist the ticket to tickets.jsonl
+        try:
+            content_items = getattr(result, "content", None) or [result]
+            for item in content_items:
+                text = getattr(item, "text", None) or str(item)
+                try:
+                    record = json.loads(text)
+                except (json.JSONDecodeError, TypeError):
+                    record = {"raw": text}
+                _write_ticket(record)
+        except Exception as write_err:
+            print(f"[DEBUG] Failed to persist ticket: {write_err}")
+        return str(result)
     except Exception as e:
         return f"Error calling FastMCP server: {e}"
-
-
-@tool(
-    name="search_knowledge_base",
-    description=(
-        "Search the IT knowledge base for troubleshooting steps and known solutions. "
-        "Use a concise keyword query such as 'VPN error 619 Mac' or 'Outlook crash Windows 11'."
-    )
-)
-def search_knowledge_base(
-    query: Annotated[str, Field(description="Concise keyword search query describing the IT issue")]
-) -> str:
-    """Query Azure AI Search for troubleshooting documents matching the user issue."""
-    try:
-        results = search_client.search(query, top=5)
-        docs = []
-        for doc in results:
-            for field in ["content", "text", "chunk", "chunk_text"]:
-                if field in doc and doc[field]:
-                    docs.append(doc[field])
-                    break
-            else:
-                docs.append(str(doc))
-        if not docs:
-            return "No relevant documents found in the knowledge base."
-        return "\n\n---\n\n".join(docs)
-    except Exception as e:
-        return f"Knowledge base search failed: {e}"
 
 
 # ============================================================
@@ -408,7 +335,6 @@ action_agent = OpenAIChatCompletionClient(
 # ════════════════════════════════════════════════════
 
 def build_retrieval_query(user_input, conversation_history):
-    """Build a search-friendly query from the latest message and recent conversation context."""
     if not conversation_history:
         print(f"[DEBUG] No history — using raw query: {user_input}")
         return user_input
@@ -457,7 +383,6 @@ def build_retrieval_query(user_input, conversation_history):
 # ════════════════════════════════════════════════════
 
 def get_search_results(query, top_k=5):
-    """Fetch relevant knowledge base chunks from Azure AI Search."""
     try:
         results = search_client.search(query, top=top_k)
         docs = []
@@ -489,112 +414,10 @@ def docs_contain_error_code(docs, error_code):
     return any(error_code in doc.lower() for doc in docs)
 
 # ════════════════════════════════════════════════════
-# LAYER 3 — TRIAGE (Clarification Check)
-# ════════════════════════════════════════════════════
-
-def is_query_vague(question, conversation_history):
-    """Ask the model whether the current support request needs clarification."""
-    system_message = (
-        "You are an IT support triage assistant. Decide if the user's question "
-        "is too vague to answer without more detail.\n\n"
-        "A query is vague if it is missing:\n"
-        "- The specific application or tool involved\n"
-        "- The operating system (Windows/Mac/Linux)\n"
-        "- Any error messages or symptoms\n"
-        "- What the user was doing when the issue occurred\n\n"
-        "Examples of vague: 'VPN not working', 'Help me', 'Outlook issue'\n"
-        "Examples of specific: 'Outlook crashes on Windows 11 when opening attachments', 'VPN on MacOS with Certification Validation Error' "
-        "'VPN drops on Mac, error 619'\n\n"
-        "If vague, respond ONLY with this JSON:\n"
-        '{"vague": true, "clarifying_question": "Your single follow-up question here"}\n\n'
-        "If specific enough, respond ONLY with:\n"
-        '{"vague": false, "clarifying_question": null}\n\n'
-        "No explanation. No markdown. JSON only."
-    )
-
-    messages = [
-        {"role": "system", "content": system_message},
-        *conversation_history[-HISTORY_LIMIT:],
-        {"role": "user", "content": question}
-    ]
-
-    try:
-        response = openai_client.chat.completions.create(
-            model=OPENAI_DEPLOYMENT,
-            messages=messages,
-            temperature=0,
-            max_tokens=100
-        )
-        raw = response.choices[0].message.content.strip()
-        print(f"[DEBUG] Vagueness check: {raw}")
-        parsed = json.loads(raw)
-        return parsed.get("vague", False), parsed.get("clarifying_question", None)
-    except Exception as e:
-        print(f"[DEBUG] Vagueness check failed: {e} — proceeding to retrieval")
-        return False, None
-
-# ════════════════════════════════════════════════════
-# LAYER 4 — GENERATION
-# ════════════════════════════════════════════════════
-
-def build_system_prompt(context_docs):
-    """Assemble the grounded system prompt from retrieved knowledge base documents."""
-    numbered_docs = "\n\n".join(
-        f"[Document {i}]\n{doc.strip()}"
-        for i, doc in enumerate(context_docs, 1)
-    )
-
-    return (
-        "You are a professional IT helpdesk support assistant for an enterprise environment.\n\n"
-
-        "RULES — follow these exactly, without exception:\n"
-        "1. Answer using ONLY the retrieved documents provided below. "
-           "Do not use ANY outside knowledge.\n"
-        "2. If the answer cannot be found in the documents, respond with EXACTLY: "
-           "'I do not know based on the knowledge base. Would you like me to connect to IT Support?' Do not guess or infer.\n"
-        "3. Always return your answer as step-by-step troubleshooting instructions "
-           "using a numbered list. Each step must be a single, clear action.\n"
-        "4. Be concise and professional. Avoid filler phrases, apologies, or preamble. "
-           "Get straight to the steps.\n"
-        "5. If the conversation history shows a previous clarification exchange, "
-           "factor that context into your answer.\n"
-        "6. If you are uncertain about any step or the answer is only partially covered "
-           "by the documents, clearly state your uncertainty in the response.\n\n"
-        "RETRIEVED DOCUMENTS:\n"
-        f"{numbered_docs}\n\n"
-        "Remember: base your answer solely on the documents above. "
-        "If the information is not there, say: 'I do not know based on my knowledge base. Would you like me to connect to IT Support?'"
-    )
-
-
-def get_grounded_answer(question, context_docs, conversation_history):
-    """Generate a document-grounded response using the retrieved support content."""
-    system_prompt = build_system_prompt(context_docs)
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *conversation_history[-HISTORY_LIMIT:],
-        {"role": "user", "content": question}
-    ]
-
-    try:
-        response = openai_client.chat.completions.create(
-            model=OPENAI_DEPLOYMENT,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=768
-        )
-        answer = response.choices[0].message.content.strip()
-        return answer
-    except Exception as e:
-        return f"Error from OpenAI: {e}"
-
-# ════════════════════════════════════════════════════
 # LAYER 5 — ESCALATION CHECK
 # ════════════════════════════════════════════════════
 
 def check_escalation(answer):
-    """Determine whether the assistant response should include an escalation message."""
     answer_lower = answer.lower()
 
     keyword_hit = any(trigger in answer_lower for trigger in ESCALATION_TRIGGERS)
@@ -643,19 +466,16 @@ def check_escalation(answer):
 # ════════════════════════════════════════════════════
 
 def looks_like_tool_request(user_input):
-    """Detect whether the user is explicitly asking for an operational tool action."""
     msg = user_input.lower()
     return any(signal in msg for signal in TOOL_REQUEST_SIGNALS)
 
 
 def looks_like_ticket_request(user_input):
-    """Detect whether the user is explicitly asking to create or escalate a ticket."""
     msg = user_input.lower()
     return any(signal in msg for signal in TICKET_REQUEST_SIGNALS)
 
 
 def looks_like_ticket_confirmation(user_input):
-    """Detect whether the user is confirming a previously offered ticket creation step."""
     msg = user_input.strip().lower()
     return any(msg == signal or msg.startswith(signal) for signal in TICKET_CONFIRMATION_SIGNALS)
 
@@ -882,7 +702,6 @@ def build_ticket_prompt(ctx):
 
 
 async def handle_user_message(user_input, conversation_history):
-    """Process one user turn and return the assistant response plus persistence flag."""
     print("\n[Agent Controller] Evaluating message...")
 
     # Pre-check: ticket confirmation following a prior escalation offer
@@ -949,7 +768,6 @@ async def handle_user_message(user_input, conversation_history):
 # ════════════════════════════════════════════════════
 
 async def main():
-    """Run the interactive CLI loop for the helpdesk assistant."""
     print("═" * 76)
     print("  Azure RAG IT Support Agent + Microsoft Agent Framework")
     print("  Memory ✓  Clarification ✓  Multi-Turn ✓  Escalation ✓  Orchestrator ✓")
