@@ -26,6 +26,7 @@ import os
 import sys
 import json
 import asyncio
+import psycopg2
 from typing import Annotated
 from pathlib import Path
 from dotenv import load_dotenv
@@ -206,39 +207,119 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example john.doe")]
 ) -> str:
-    user = Tools.MOCK_USERS.get(username.lower())
-    if not user:
-        return f"No user found for username '{username}'."
-
-    return (
-        f"User found:\n"
-        f"- Username: {user['username']}\n"
-        f"- First Name: {user['first_name']}\n"
-        f"- Last Name: {user['last_name']}\n"
-        f"- Department: {user['department']}\n"
-        f"- Email: {user['email']}\n"
-        f"- Device ID: {user['device_id']}"
-    )
+    postgres_conn_string = "dbname=postgres user=ithelpdesk_pod2_admin password=pwc-ai-bootcamp-p2-pw port=5432 host=ithelpdesk-pod2-postgres-db.postgres.database.azure.com" #os.getenv("POSTGRES_CONNECTION_STRING")
+    if not postgres_conn_string:
+        return "Error: POSTGRES_CONNECTION_STRING environment variable not set."
+    
+    try:
+        connection = psycopg2.connect(postgres_conn_string)
+        cursor = connection.cursor()
+        
+        # Query the users table for the given username (case-insensitive)
+        cursor.execute(
+            "SELECT username, first_name, last_name, department, email, device_id FROM demo.users WHERE LOWER(username) = %s",
+            (username.lower(),)
+        )
+        user_row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        
+        if not user_row:
+            return f"No user found for username '{username}'."
+        
+        # Map result columns to dict
+        user = {
+            'username': user_row[0],
+            'first_name': user_row[1],
+            'last_name': user_row[2],
+            'department': user_row[3],
+            'email': user_row[4],
+            'device_id': user_row[5]
+        }
+        
+        return (
+            f"User found:\n"
+            f"- Username: {user['username']}\n"
+            f"- First Name: {user['first_name']}\n"
+            f"- Last Name: {user['last_name']}\n"
+            f"- Department: {user['department']}\n"
+            f"- Email: {user['email']}\n"
+            f"- Device ID: {user['device_id']}"
+        )
+    except psycopg2.Error as e:
+        return f"Database error: {str(e)}"
+    except Exception as e:
+        return f"Error looking up user: {str(e)}"
 
 
 @tool(
     name="check_device_status",
-    description="Check the status of a company device by device ID. Use for laptop or device status requests."
+    description="Check the status of a company device by device ID or username. Use for laptop or device status requests."
 )
 def check_device_status(
-    device_id: Annotated[str, Field(description="Device ID, for example LAPTOP-1001")]
+    device_or_username: Annotated[str, Field(description="Device ID (for example LAPTOP-1001) or username (for example john.doe)")]
 ) -> str:
-    device = Tools.MOCK_DEVICES.get(device_id.upper())
-    if not device:
-        return f"No device found for device ID '{device_id}'."
+    postgres_conn_string = os.getenv("POSTGRES_CONNECTION_STRING")
+    if not postgres_conn_string:
+        return "Error: POSTGRES_CONNECTION_STRING environment variable not set."
 
-    return (
-        f"Device status:\n"
-        f"- Device ID: {device['device_id']}\n"
-        f"- Status: {device['status']}\n"
-        f"- VPN Client: {device['vpn_client']}\n"
-        f"- Last Seen: {device['last_seen']}"
-    )
+    try:
+        with psycopg2.connect(postgres_conn_string) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        d.device_id,
+                        d.status,
+                        d.vpn_client,
+                        d.last_seen,
+                        u.username
+                    FROM demo.devices d
+                    LEFT JOIN demo.users u ON u.device_id = d.device_id
+                    WHERE UPPER(d.device_id) = UPPER(%s)
+                       OR LOWER(u.username) = LOWER(%s)
+                    """,
+                    (device_or_username, device_or_username),
+                )
+                device_rows = cursor.fetchall()
+
+                if not device_rows:
+                    return f"No device found for identifier '{device_or_username}'."
+
+                formatted_rows = []
+                for idx, device_row in enumerate(device_rows, start=1):
+                    device_id = device_row[0]
+                    status = device_row[1]
+                    vpn_client = device_row[2]
+                    current_last_seen = device_row[3]
+                    username = device_row[4] or "unknown"
+
+                    cursor.execute(
+                        """
+                        UPDATE demo.devices
+                        SET last_seen = NOW()
+                        WHERE device_id = %s
+                        RETURNING last_seen
+                        """,
+                        (device_id,),
+                    )
+                    updated_last_seen = cursor.fetchone()[0]
+
+                    formatted_rows.append(
+                        f"Match {idx}:\n"
+                        f"- Device ID: {device_id}\n"
+                        f"- Username: {username}\n"
+                        f"- Status: {status}\n"
+                        f"- VPN Client: {vpn_client}\n"
+                        f"- Last Seen (previous): {current_last_seen}\n"
+                        f"- Last Seen (updated): {updated_last_seen}"
+                    )
+
+                return "Device status:\n\n" + "\n\n".join(formatted_rows)
+    except psycopg2.Error as e:
+        return f"Database error: {str(e)}"
+    except Exception as e:
+        return f"Error checking device status: {str(e)}"
 
 
 @tool(
