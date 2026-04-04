@@ -158,10 +158,19 @@ MAF_ACTION_INSTRUCTIONS = (
     "Rules:\n"
     "1. Use lookup_user only for user identity lookups.\n"
     "2. Use check_device_status only for device state checks.\n"
-    "3. Use create_ticket when directed. All required fields will be provided — call the tool immediately with the given values.\n"
-    "4. Do NOT ask for more information when ticket fields are already supplied in the prompt.\n"
-    "5. After ticket creation, reply with ticket_id, severity, status, and assignment_group.\n"
-    "6. Keep the final answer concise and professional."
+    "3. Use create_ticket when directed.\n"
+    "4. Before creating a ticket, make sure you have:\n"
+    " - first name\n"
+    " - last name\n"
+    " - issue description\n"
+    "5. If first name or last name is missing, ask for them separately:\n"
+    " - First ask for the first name\n"
+    " - Then ask for the last name\n"
+    "6. After collecting the name, call lookup_user to retrieve the user's details and device_id.\n"
+    "7. Include the user's full name and device_id in the ticket payload whenever available.\n"
+    "8. Do NOT ask for more information if all required ticket fields are already available.\n"
+    "9. After ticket creation, reply with ticket_id, severity, status, and assignment_group.\n"
+    "10. Keep the final answer concise and professional."
 )
 
 if not all([
