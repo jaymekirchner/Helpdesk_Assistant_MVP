@@ -26,9 +26,8 @@ import os
 import sys
 import json
 import asyncio
-import psycopg2
+import time
 from typing import Annotated
-from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import Field
 from azure.search.documents import SearchClient
@@ -36,7 +35,6 @@ from azure.core.credentials import AzureKeyCredential
 from openai import AzureOpenAI
 from agent_framework import tool
 from agent_framework.openai import OpenAIChatCompletionClient
-from tool_data import Tools
 
 load_dotenv()
 
@@ -51,7 +49,6 @@ OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
 
 HISTORY_LIMIT = 12
 KNOWLEDGE_TOP_K = 10
-TICKETS_FILE = Path("tickets.jsonl")
 
 ESCALATION_TRIGGERS = [
     "i don't know based on the knowledge base",
@@ -200,11 +197,47 @@ openai_client = AzureOpenAI(
     azure_endpoint=OPENAI_ENDPOINT
 )
 
+_MCP_MAX_RETRIES = 3
+_MCP_RETRY_BACKOFF = [0.5, 1.5, 3.0]  # seconds between attempts
 
 
-def _write_ticket(ticket_record):
-    with TICKETS_FILE.open("a", encoding="utf-8") as fp:
-        fp.write(json.dumps(ticket_record) + "\n")
+def _call_mcp_tool(tool_name: str, args: dict):
+    """Call an MCP tool over HTTP transport with retry/backoff on transient errors."""
+    from fastmcp import Client
+    import concurrent.futures
+
+    async def _call_async():
+        client = Client("http://localhost:8000/mcp")
+        async with client:
+            return await client.call_tool(tool_name, args)
+
+    last_exc = None
+    for attempt in range(_MCP_MAX_RETRIES):
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _call_async()).result()
+        except Exception as e:
+            last_exc = e
+            if attempt < _MCP_MAX_RETRIES - 1:
+                delay = _MCP_RETRY_BACKOFF[attempt]
+                print(f"[MCP] Tool '{tool_name}' attempt {attempt + 1} failed: {e} — retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                print(f"[MCP] Tool '{tool_name}' failed after {_MCP_MAX_RETRIES} attempts: {e}")
+    raise last_exc
+
+
+def _extract_mcp_records(result):
+    """Normalize MCP CallToolResult content into parsed record dicts."""
+    records = []
+    content_items = getattr(result, "content", None) or [result]
+    for item in content_items:
+        text = getattr(item, "text", None) or str(item)
+        try:
+            records.append(json.loads(text))
+        except (json.JSONDecodeError, TypeError):
+            records.append({"raw": text})
+    return records
 
 # ============================================================
 # MAF TOOLS
@@ -216,49 +249,28 @@ def _write_ticket(ticket_record):
 def lookup_user(
     username: Annotated[str, Field(description="Employee username, for example john.doe")]
 ) -> str:
-    postgres_conn_string = os.getenv("POSTGRES_CONNECTION_STRING")
-    if not postgres_conn_string:
-        return "Error: POSTGRES_CONNECTION_STRING environment variable not set."
-    
     try:
-        connection = psycopg2.connect(postgres_conn_string)
-        cursor = connection.cursor()
-        
-        # Query the users table for the given username (case-insensitive)
-        cursor.execute(
-            "SELECT username, first_name, last_name, department, email, device_id FROM demo.users WHERE LOWER(username) = %s",
-            (username.lower(),)
-        )
-        user_row = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        
-        if not user_row:
-            return f"No user found for username '{username}'."
-        
-        # Map result columns to dict
-        user = {
-            'username': user_row[0],
-            'first_name': user_row[1],
-            'last_name': user_row[2],
-            'department': user_row[3],
-            'email': user_row[4],
-            'device_id': user_row[5]
-        }
-        
+        result = _call_mcp_tool("lookup_user", {"username": username})
+        records = _extract_mcp_records(result)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "User lookup failed."
+        record = envelope.get("data") or {}
+        full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
+        if not full_name:
+            full_name = record.get("name", "Unknown")
         return (
-            f"User found:\n"
-            f"- Username: {user['username']}\n"
-            f"- First Name: {user['first_name']}\n"
-            f"- Last Name: {user['last_name']}\n"
-            f"- Department: {user['department']}\n"
-            f"- Email: {user['email']}\n"
-            f"- Device ID: {user['device_id']}"
+            "User found:\n"
+            f"- Username: {record.get('username', username)}\n"
+            f"- Name: {full_name}\n"
+            f"- Department: {record.get('department', 'Unknown')}\n"
+            f"- Email: {record.get('email', 'Unknown')}\n"
+            f"- Device ID: {record.get('device_id', 'Unknown')}"
         )
-    except psycopg2.Error as e:
-        return f"Database error: {str(e)}"
     except Exception as e:
-        return f"Error looking up user: {str(e)}"
+        return f"Error looking up user via MCP: {str(e)}"
 
 
 @tool(
@@ -268,67 +280,26 @@ def lookup_user(
 def check_device_status(
     device_or_username: Annotated[str, Field(description="Device ID (for example LAPTOP-1001) or username (for example john.doe)")]
 ) -> str:
-    postgres_conn_string = os.getenv("POSTGRES_CONNECTION_STRING")
-    if not postgres_conn_string:
-        return "Error: POSTGRES_CONNECTION_STRING environment variable not set."
-
     try:
-        with psycopg2.connect(postgres_conn_string) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT
-                        d.device_id,
-                        d.status,
-                        d.vpn_client,
-                        d.last_seen,
-                        u.username
-                    FROM demo.devices d
-                    LEFT JOIN demo.users u ON u.device_id = d.device_id
-                    WHERE UPPER(d.device_id) = UPPER(%s)
-                       OR LOWER(u.username) = LOWER(%s)
-                    """,
-                    (device_or_username, device_or_username),
-                )
-                device_rows = cursor.fetchall()
-
-                if not device_rows:
-                    return f"No device found for identifier '{device_or_username}'."
-
-                formatted_rows = []
-                for idx, device_row in enumerate(device_rows, start=1):
-                    device_id = device_row[0]
-                    status = device_row[1]
-                    vpn_client = device_row[2]
-                    current_last_seen = device_row[3]
-                    username = device_row[4] or "unknown"
-
-                    cursor.execute(
-                        """
-                        UPDATE demo.devices
-                        SET last_seen = NOW()
-                        WHERE device_id = %s
-                        RETURNING last_seen
-                        """,
-                        (device_id,),
-                    )
-                    updated_last_seen = cursor.fetchone()[0]
-
-                    formatted_rows.append(
-                        f"Match {idx}:\n"
-                        f"- Device ID: {device_id}\n"
-                        f"- Username: {username}\n"
-                        f"- Status: {status}\n"
-                        f"- VPN Client: {vpn_client}\n"
-                        f"- Last Seen (previous): {current_last_seen}\n"
-                        f"- Last Seen (updated): {updated_last_seen}"
-                    )
-
-                return "Device status:\n\n" + "\n\n".join(formatted_rows)
-    except psycopg2.Error as e:
-        return f"Database error: {str(e)}"
+        result = _call_mcp_tool("check_device_status", {"device_or_username": device_or_username})
+        records = _extract_mcp_records(result)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "Device lookup failed."
+        record = envelope.get("data") or {}
+        return (
+            "Device status:\n\n"
+            "Match 1:\n"
+            f"- Device ID: {record.get('device_id', 'Unknown')}\n"
+            f"- Username: {record.get('username', 'unknown')}\n"
+            f"- Status: {record.get('status', 'Unknown')}\n"
+            f"- VPN Client: {record.get('vpn_client', 'Unknown')}\n"
+            f"- Last Seen: {record.get('last_seen', 'Unknown')}"
+        )
     except Exception as e:
-        return f"Error checking device status: {str(e)}"
+        return f"Error checking device status via MCP: {str(e)}"
 
 
 @tool(
@@ -342,46 +313,35 @@ def create_ticket(
     severity: Annotated[str, Field(description="Business impact severity: Low, Medium, High, Critical")] = "Medium",
     impacted_system: Annotated[str, Field(description="Impacted application or system")]= "Unknown",
 ) -> str:
-    """
-    Calls the FastMCP server's create_ticket tool via MCP HTTP transport.
-    """
-    from fastmcp import Client
-    import asyncio
-    import concurrent.futures
-
-    async def _call():
-        client = Client("http://localhost:8000/mcp")
-        async with client:
-            result = await client.call_tool(
-                "create_ticket",
-                {
-                    "issue": issue,
-                    "user": user,
-                    "category": category,
-                    "severity": severity,
-                    "impacted_system": impacted_system,
-                },
-            )
-            return result  # return raw list of content objects
-
+    """Create a ticket via MCP server tool."""
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(asyncio.run, _call()).result()
-        # Persist the ticket to tickets.jsonl
-        try:
-            content_items = getattr(result, "content", None) or [result]
-            for item in content_items:
-                text = getattr(item, "text", None) or str(item)
-                try:
-                    record = json.loads(text)
-                except (json.JSONDecodeError, TypeError):
-                    record = {"raw": text}
-                _write_ticket(record)
-        except Exception as write_err:
-            print(f"[DEBUG] Failed to persist ticket: {write_err}")
-        return str(result)
+        result = _call_mcp_tool(
+            "create_ticket",
+            {
+                "issue": issue,
+                "user": user,
+                "category": category,
+                "severity": severity,
+                "impacted_system": impacted_system,
+            },
+        )
+        records = _extract_mcp_records(result)
+
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return f"Ticket creation failed: {envelope.get('error') or 'Unknown error'}"
+        data = envelope.get("data") or {}
+        return (
+            f"Ticket created successfully. "
+            f"ID: {data.get('ticket_id')}, "
+            f"Status: {data.get('status')}, "
+            f"Priority: {data.get('priority')}, "
+            f"Assignment Group: {data.get('assignment_group')}"
+        )
     except Exception as e:
-        return f"Error calling FastMCP server: {e}"
+        return f"Error calling MCP ticket tool: {e}"
 
 
 # ============================================================
@@ -702,11 +662,11 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
         print("[Orchestrator] Overriding route to ACTION due to explicit ticket request.")
         route_to = "action"
 
-    # Safety gate: only allow direct action routing when user intent is explicitly operational.
+    # Safety note: triage can infer operational intent from full context,
+    # so do not force-downgrade ACTION based only on keyword matching.
     explicit_action_intent = looks_like_tool_request(user_input) or looks_like_ticket_request(user_input)
     if route_to == "action" and not explicit_action_intent:
-        print("[Orchestrator] Action route overridden to KNOWLEDGE (no explicit action intent)")
-        route_to = "knowledge"
+        print("[Orchestrator] Action route kept from TRIAGE (weak explicit signal, context-based action intent)")
 
     print(f"[Orchestrator] Route → {route_to.upper()} | Urgency: {urgency} | Category: {category}")
 

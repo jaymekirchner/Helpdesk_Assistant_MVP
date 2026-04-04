@@ -8,3 +8,4 @@ streamlit
 agent_framework
 fastmcp
 psycopg2
+mcp[cli]
