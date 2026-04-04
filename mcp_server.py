@@ -1,5 +1,6 @@
 import os
 import base64
+import datetime
 
 import psycopg2
 import requests
@@ -9,6 +10,42 @@ from fastmcp import FastMCP
 load_dotenv()
 
 mcp = FastMCP("IT Helpdesk MCP Server")
+
+
+@mcp.tool
+def health_check() -> dict:
+    """Return server readiness status and connectivity checks for all dependencies."""
+    checks = {}
+
+    # Postgres
+    conn_str = _postgres_conn_string()
+    if conn_str:
+        try:
+            with psycopg2.connect(conn_str) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            checks["postgres"] = "ok"
+        except psycopg2.Error as e:
+            checks["postgres"] = f"error: {e}"
+    else:
+        checks["postgres"] = "not configured"
+
+    # Freshworks
+    if os.getenv("FRESHWORKS_API_KEY") and os.getenv("FRESHWORKS_DOMAIN"):
+        checks["freshworks"] = "configured"
+    else:
+        checks["freshworks"] = "not configured"
+
+    all_ok = all(v in ("ok", "configured") for v in checks.values())
+    return {
+        "success": all_ok,
+        "error": None if all_ok else "One or more dependencies are unavailable",
+        "data": {
+            "status": "ready" if all_ok else "degraded",
+            "checks": checks,
+            "timestamp_utc": datetime.datetime.utcnow().isoformat(),
+        },
+    }
 
 
 def _postgres_conn_string() -> str:
@@ -81,10 +118,9 @@ def create_ticket(
 
     if not freshworks_api_key or not endpoint:
         return {
+            "success": False,
             "error": "FRESHWORKS_API_KEY or FRESHWORKS_DOMAIN is not configured.",
-            "status": "failed",
-            "issue": issue,
-            "user": user,
+            "data": None,
         }
 
     auth = base64.b64encode(f"{freshworks_api_key}:".encode()).decode()
@@ -107,35 +143,35 @@ def create_ticket(
         response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
         if not response.ok:
             return {
+                "success": False,
                 "error": f"FreshWorks API error ({response.status_code}): {response.text}",
-                "status": "failed",
-                "issue": issue,
-                "user": user,
-                "payload": payload,
+                "data": {"payload": payload},
             }
 
         ticket_data = response.json().get("ticket", {})
         return {
-            "ticket_id": ticket_data.get("id"),
-            "ticket_number": ticket_data.get("ticket_number"),
-            "user": user,
-            "issue": issue,
-            "category": category,
-            "severity": severity,
-            "impacted_system": impacted_system,
-            "status": ticket_data.get("status"),
-            "priority": _map_severity_to_priority(severity),
-            "assignment_group": ticket_data.get("group_id"),
-            "created_at_utc": ticket_data.get("created_at"),
-            "url": f"https://{os.getenv('FRESHWORKS_DOMAIN')}.freshservice.com/support/tickets/{ticket_data.get('id')}",
             "success": True,
+            "error": None,
+            "data": {
+                "ticket_id": ticket_data.get("id"),
+                "ticket_number": ticket_data.get("ticket_number"),
+                "user": user,
+                "issue": issue,
+                "category": category,
+                "severity": severity,
+                "impacted_system": impacted_system,
+                "status": ticket_data.get("status"),
+                "priority": _map_severity_to_priority(severity),
+                "assignment_group": ticket_data.get("group_id"),
+                "created_at_utc": ticket_data.get("created_at"),
+                "url": f"https://{os.getenv('FRESHWORKS_DOMAIN')}.freshservice.com/support/tickets/{ticket_data.get('id')}",
+            },
         }
     except requests.RequestException as e:
         return {
+            "success": False,
             "error": f"FreshWorks request failed: {e}",
-            "status": "failed",
-            "issue": issue,
-            "user": user,
+            "data": None,
         }
 
 
@@ -144,7 +180,7 @@ def lookup_user(username: str) -> dict:
     """Look up a corporate user by username (Postgres only)."""
     conn = _postgres_conn_string()
     if not conn:
-        return {"error": "POSTGRES_CONNECTION_STRING is not configured."}
+        return {"success": False, "error": "POSTGRES_CONNECTION_STRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
@@ -154,17 +190,21 @@ def lookup_user(username: str) -> dict:
                 )
                 row = cursor.fetchone()
                 if not row:
-                    return {"error": f"No user found for username '{username}'."}
+                    return {"success": False, "error": f"No user found for username '{username}'.", "data": None}
                 return {
-                    "username": row[0],
-                    "first_name": row[1],
-                    "last_name": row[2],
-                    "department": row[3],
-                    "email": row[4],
-                    "device_id": row[5],
+                    "success": True,
+                    "error": None,
+                    "data": {
+                        "username": row[0],
+                        "first_name": row[1],
+                        "last_name": row[2],
+                        "department": row[3],
+                        "email": row[4],
+                        "device_id": row[5],
+                    },
                 }
     except psycopg2.Error as e:
-        return {"error": f"Database error: {e}"}
+        return {"success": False, "error": f"Database error: {e}", "data": None}
 
 
 @mcp.tool
@@ -172,7 +212,7 @@ def check_device_status(device_or_username: str) -> dict:
     """Check device state by device ID or username (Postgres only)."""
     conn = _postgres_conn_string()
     if not conn:
-        return {"error": "POSTGRES_CONNECTION_STRING is not configured."}
+        return {"success": False, "error": "POSTGRES_CONNECTION_STRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
@@ -189,16 +229,20 @@ def check_device_status(device_or_username: str) -> dict:
                 )
                 row = cursor.fetchone()
                 if not row:
-                    return {"error": f"No device found for identifier '{device_or_username}'."}
+                    return {"success": False, "error": f"No device found for identifier '{device_or_username}'.", "data": None}
                 return {
-                    "device_id": row[0],
-                    "status": row[1],
-                    "vpn_client": row[2],
-                    "last_seen": str(row[3]),
-                    "username": row[4] or "unknown",
+                    "success": True,
+                    "error": None,
+                    "data": {
+                        "device_id": row[0],
+                        "status": row[1],
+                        "vpn_client": row[2],
+                        "last_seen": str(row[3]),
+                        "username": row[4] or "unknown",
+                    },
                 }
     except psycopg2.Error as e:
-        return {"error": f"Database error: {e}"}
+        return {"success": False, "error": f"Database error: {e}", "data": None}
 
 
 # To run:

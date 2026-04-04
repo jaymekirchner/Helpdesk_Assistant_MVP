@@ -26,6 +26,7 @@ import os
 import sys
 import json
 import asyncio
+import time
 from typing import Annotated
 from dotenv import load_dotenv
 from pydantic import Field
@@ -187,8 +188,12 @@ openai_client = AzureOpenAI(
     azure_endpoint=OPENAI_ENDPOINT
 )
 
+_MCP_MAX_RETRIES = 3
+_MCP_RETRY_BACKOFF = [0.5, 1.5, 3.0]  # seconds between attempts
+
+
 def _call_mcp_tool(tool_name: str, args: dict):
-    """Call an MCP tool over HTTP transport and return the raw result."""
+    """Call an MCP tool over HTTP transport with retry/backoff on transient errors."""
     from fastmcp import Client
     import concurrent.futures
 
@@ -197,8 +202,20 @@ def _call_mcp_tool(tool_name: str, args: dict):
         async with client:
             return await client.call_tool(tool_name, args)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, _call_async()).result()
+    last_exc = None
+    for attempt in range(_MCP_MAX_RETRIES):
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _call_async()).result()
+        except Exception as e:
+            last_exc = e
+            if attempt < _MCP_MAX_RETRIES - 1:
+                delay = _MCP_RETRY_BACKOFF[attempt]
+                print(f"[MCP] Tool '{tool_name}' attempt {attempt + 1} failed: {e} — retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                print(f"[MCP] Tool '{tool_name}' failed after {_MCP_MAX_RETRIES} attempts: {e}")
+    raise last_exc
 
 
 def _extract_mcp_records(result):
@@ -226,22 +243,23 @@ def lookup_user(
     try:
         result = _call_mcp_tool("lookup_user", {"username": username})
         records = _extract_mcp_records(result)
-        record = records[0] if records else {}
-        if isinstance(record, dict) and record.get("error"):
-            return record["error"]
-        if isinstance(record, dict):
-            full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
-            if not full_name:
-                full_name = record.get("name", "Unknown")
-            return (
-                "User found:\n"
-                f"- Username: {record.get('username', username)}\n"
-                f"- Name: {full_name}\n"
-                f"- Department: {record.get('department', 'Unknown')}\n"
-                f"- Email: {record.get('email', 'Unknown')}\n"
-                f"- Device ID: {record.get('device_id', 'Unknown')}"
-            )
-        return str(record)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "User lookup failed."
+        record = envelope.get("data") or {}
+        full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
+        if not full_name:
+            full_name = record.get("name", "Unknown")
+        return (
+            "User found:\n"
+            f"- Username: {record.get('username', username)}\n"
+            f"- Name: {full_name}\n"
+            f"- Department: {record.get('department', 'Unknown')}\n"
+            f"- Email: {record.get('email', 'Unknown')}\n"
+            f"- Device ID: {record.get('device_id', 'Unknown')}"
+        )
     except Exception as e:
         return f"Error looking up user via MCP: {str(e)}"
 
@@ -256,20 +274,21 @@ def check_device_status(
     try:
         result = _call_mcp_tool("check_device_status", {"device_or_username": device_or_username})
         records = _extract_mcp_records(result)
-        record = records[0] if records else {}
-        if isinstance(record, dict) and record.get("error"):
-            return record["error"]
-        if isinstance(record, dict):
-            return (
-                "Device status:\n\n"
-                "Match 1:\n"
-                f"- Device ID: {record.get('device_id', 'Unknown')}\n"
-                f"- Username: {record.get('username', 'unknown')}\n"
-                f"- Status: {record.get('status', 'Unknown')}\n"
-                f"- VPN Client: {record.get('vpn_client', 'Unknown')}\n"
-                f"- Last Seen: {record.get('last_seen', 'Unknown')}"
-            )
-        return str(record)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "Device lookup failed."
+        record = envelope.get("data") or {}
+        return (
+            "Device status:\n\n"
+            "Match 1:\n"
+            f"- Device ID: {record.get('device_id', 'Unknown')}\n"
+            f"- Username: {record.get('username', 'unknown')}\n"
+            f"- Status: {record.get('status', 'Unknown')}\n"
+            f"- VPN Client: {record.get('vpn_client', 'Unknown')}\n"
+            f"- Last Seen: {record.get('last_seen', 'Unknown')}"
+        )
     except Exception as e:
         return f"Error checking device status via MCP: {str(e)}"
 
@@ -299,18 +318,19 @@ def create_ticket(
         )
         records = _extract_mcp_records(result)
 
-        record = records[0] if records else {}
-        if isinstance(record, dict) and record.get("error"):
-            return f"Ticket creation failed: {record['error']}"
-        if isinstance(record, dict) and record.get("success"):
-            return (
-                f"Ticket created successfully. "
-                f"ID: {record.get('ticket_id')}, "
-                f"Status: {record.get('status')}, "
-                f"Priority: {record.get('priority')}, "
-                f"Assignment Group: {record.get('assignment_group')}"
-            )
-        return str(record)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return f"Ticket creation failed: {envelope.get('error') or 'Unknown error'}"
+        data = envelope.get("data") or {}
+        return (
+            f"Ticket created successfully. "
+            f"ID: {data.get('ticket_id')}, "
+            f"Status: {data.get('status')}, "
+            f"Priority: {data.get('priority')}, "
+            f"Assignment Group: {data.get('assignment_group')}"
+        )
     except Exception as e:
         return f"Error calling MCP ticket tool: {e}"
 

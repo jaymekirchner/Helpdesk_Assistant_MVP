@@ -9,7 +9,7 @@ from streamlit.errors import StreamlitAPIException
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import the main logic from the MCP-enabled module
-from appFinal import handle_user_message
+from appFinal import handle_user_message, _call_mcp_tool, _extract_mcp_records
 
 # Set page configuration
 st.set_page_config(
@@ -170,6 +170,8 @@ def initialize_session_state():
     # add statement so that the user input is cleared after 
     if 'last_input' not in st.session_state:
         st.session_state.last_input = ""
+        if 'health_status' not in st.session_state:
+            st.session_state.health_status = _run_health_check()
 
 
 def add_message(role, content):
@@ -180,6 +182,19 @@ def add_message(role, content):
         'content': content,
         'timestamp': timestamp
     })
+
+
+def _run_health_check():
+    """Call the MCP health_check tool once and cache the result in session state."""
+    try:
+        result = _call_mcp_tool("health_check", {})
+        records = _extract_mcp_records(result)
+        envelope = records[0] if records else {}
+        if isinstance(envelope, dict) and "data" in envelope:
+            return envelope
+        return None
+    except Exception:
+        return None
 
 
 def handle_ui_error(error, user_message="Sorry, I encountered an error while updating the interface."):
@@ -293,6 +308,25 @@ def main():
         # st.markdown("- 'lookup user [username]'")
         # st.markdown("- 'check device [device_id]'")
         # st.markdown("- 'create ticket' for escalation")
+
+        # ── MCP Server Status ──────────────────────────────
+        health = st.session_state.get("health_status")
+        if health is None:
+            st.error("⛔ MCP Server unreachable — tool calls will fail.")
+        else:
+            data = health.get("data") or {}
+            checks = data.get("checks", {})
+            if health.get("success"):
+                st.success("✅ Server ready")
+            else:
+                st.warning("⚠️ Server degraded")
+            for dep, status in checks.items():
+                icon = "🟢" if status in ("ok", "configured") else "🔴"
+                st.markdown(f"{icon} **{dep}**: {status}")
+        if st.button("🔄 Recheck"):
+            st.session_state.health_status = _run_health_check()
+            st.rerun()
+        st.markdown("---")
 
         if st.button("🗑️ Clear Conversation"):
             try:
