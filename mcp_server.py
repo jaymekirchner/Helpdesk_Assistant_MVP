@@ -119,11 +119,17 @@ def _map_category_to_ticket_type(category: str) -> str:
     return mapping.get(category, "Service Request")
 
 
-def _resolve_requester_email(user: str) -> str:
+def _resolve_requester_email(user: str) -> tuple[str, list[str]]:
+    """Return (requester_email, cc_emails).
+    When the user has a valid email address, they are the requester and the
+    default helpdesk address is CC'd.  Otherwise the default address is the
+    requester and cc_emails is empty.
+    """
     default_email = os.getenv("FRESHWORKS_DEFAULT_REQUESTER_EMAIL", "helpdesk@corp.com")
     if user and "@" in user:
-        return user
-    return default_email
+        cc = [default_email] if default_email and default_email.lower() != user.lower() else []
+        return user, cc
+    return default_email, []
 
 
 def _map_freshworks_status(status_code) -> str:
@@ -233,8 +239,10 @@ def create_ticket(
     auth = base64.b64encode(f"{freshworks_api_key}:".encode()).decode()
     headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
+    requester_email, cc_emails = _resolve_requester_email(user)
     payload = {
-        "email": _resolve_requester_email(user),
+        "email": requester_email,
+        "cc_emails": cc_emails,
         "subject": issue[:100],
         "description": f"Impacted System: {impacted_system}\nCategory: {category}\n\nIssue: {issue}",
         "status": 2,
@@ -477,28 +485,61 @@ def lookup_tickets_by_user(username: str = "", first_name: str = "", last_name: 
 
 
 @mcp.tool
-def check_device_status(device_or_username: str) -> dict:
-    """Check device state by device ID or username (Postgres only)."""
+def check_device_status(
+    device_or_username: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> dict:
+    """Check device state by device ID, username, or first and last name (Postgres only).
+    Provide 'device_or_username' for a device ID or username lookup, or provide both
+    'first_name' and 'last_name' to look up by the user's full name.
+    """
+    device_or_username = (device_or_username or "").strip()
+    first_name = (first_name or "").strip()
+    last_name = (last_name or "").strip()
+
+    if not device_or_username and not (first_name and last_name):
+        return {
+            "success": False,
+            "error": "Provide a device ID or username via 'device_or_username', or provide both 'first_name' and 'last_name'.",
+            "data": None,
+        }
+
     conn = _postgres_conn_string()
     if not conn:
         return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
+                conditions = []
+                params = []
+
+                if device_or_username:
+                    conditions.append("UPPER(d.device_id) = UPPER(%s)")
+                    params.append(device_or_username)
+                    conditions.append("LOWER(u.username) = LOWER(%s)")
+                    params.append(device_or_username)
+
+                if first_name and last_name:
+                    conditions.append("(LOWER(u.first_name) = LOWER(%s) AND LOWER(u.last_name) = LOWER(%s))")
+                    params.extend([first_name, last_name])
+
+                where_clause = " OR ".join(conditions)
                 cursor.execute(
-                    """
-                    SELECT d.device_id, d.status, d.vpn_client, d.last_seen, u.username
+                    f"""
+                    SELECT d.device_id, d.status, d.vpn_client, d.last_seen, u.username,
+                           u.first_name, u.last_name
                     FROM demo.devices d
                     LEFT JOIN demo.users u ON u.device_id = d.device_id
-                    WHERE UPPER(d.device_id) = UPPER(%s)
-                       OR LOWER(u.username) = LOWER(%s)
+                    WHERE {where_clause}
                     LIMIT 1
                     """,
-                    (device_or_username, device_or_username),
+                    params,
                 )
                 row = cursor.fetchone()
                 if not row:
-                    return {"success": False, "error": f"No device found for identifier '{device_or_username}'.", "data": None}
+                    identifier = device_or_username or f"{first_name} {last_name}"
+                    return {"success": False, "error": f"No device found for identifier '{identifier}'.", "data": None}
                 return {
                     "success": True,
                     "error": None,
@@ -508,6 +549,8 @@ def check_device_status(device_or_username: str) -> dict:
                         "vpn_client": row[2],
                         "last_seen": str(row[3]),
                         "username": row[4] or "unknown",
+                        "first_name": row[5] or "",
+                        "last_name": row[6] or "",
                     },
                 }
     except psycopg2.Error as e:
