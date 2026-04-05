@@ -64,7 +64,7 @@ Added version pinning and compatibility:
 ### Prerequisite
 - Azure subscription
 - Resource Group created
-- App Service created (Python 3.10 runtime)
+- App Service created (Python 3.11 runtime)
 
 ### 3-Step Deployment
 

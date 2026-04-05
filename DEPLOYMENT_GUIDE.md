@@ -8,7 +8,7 @@
 ## 📋 Pre-Deployment Checklist
 
 ### 1. Azure Resources Required
-- [ ] Azure App Service (Python 3.10 runtime)
+- [ ] Azure App Service (Python 3.11 runtime)
 - [ ] Azure Cognitive Search instance
 - [ ] Azure OpenAI resource
 - [ ] PostgreSQL database (Azure Database for PostgreSQL)

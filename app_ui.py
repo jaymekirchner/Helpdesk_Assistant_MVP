@@ -9,7 +9,23 @@ from streamlit.errors import StreamlitAPIException
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import the main logic from the MCP-enabled module
-from appFinal import handle_user_message, _call_mcp_tool, _extract_mcp_records
+APP_IMPORT_ERROR = None
+try:
+    from appFinal import handle_user_message, _call_mcp_tool, _extract_mcp_records
+except Exception as import_error:
+    APP_IMPORT_ERROR = import_error
+
+    async def handle_user_message(user_input, conversation_history):
+        return (
+            "The assistant backend failed to initialize due to a missing or broken Python package. "
+            f"Startup error: {APP_IMPORT_ERROR}"
+        ), False
+
+    def _call_mcp_tool(tool_name, args):
+        raise RuntimeError(f"Backend initialization failed: {APP_IMPORT_ERROR}")
+
+    def _extract_mcp_records(result):
+        return []
 
 # Set page configuration
 st.set_page_config(
@@ -186,6 +202,15 @@ def add_message(role, content):
 
 def _run_health_check():
     """Call the MCP health_check tool once and cache the result in session state."""
+    if APP_IMPORT_ERROR is not None:
+        return {
+            "success": False,
+            "error": f"Backend import failed: {APP_IMPORT_ERROR}",
+            "data": {
+                "status": "degraded",
+                "checks": {"backend_import": "error"},
+            },
+        }
     try:
         result = _call_mcp_tool("health_check", {})
         records = _extract_mcp_records(result)
@@ -320,6 +345,9 @@ def main():
                 st.success("✅ Server ready")
             else:
                 st.warning("⚠️ Server degraded")
+                error_details = health.get("error")
+                if error_details:
+                    st.error(f"Startup details: {error_details}")
             for dep, status in checks.items():
                 icon = "🟢" if status in ("ok", "configured") else "🔴"
                 st.markdown(f"{icon} **{dep}**: {status}")
