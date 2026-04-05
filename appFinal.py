@@ -847,7 +847,11 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
         if action_agent is None:
             return "Action agent is unavailable because Azure OpenAI settings are missing or invalid."
         try:
-            action_response = await action_agent.run(user_input)
+            action_prompt = (
+                f"Conversation history:\n{history_context}\n\nUser message: {user_input}"
+                if history_context else user_input
+            )
+            action_response = await action_agent.run(action_prompt)
             return action_response.text.strip()
         except Exception as e:
             return f"Action execution failed: {e}"
