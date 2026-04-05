@@ -1,0 +1,28 @@
+# Exclude local environment and cache
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Exclude VCS and editor metadata
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Exclude local configs and logs
+.env
+*.log
+python.log
+
+# Exclude non-runtime folders/files
+old_files/
+.recovery/
+dist/
+documentation/
+infra/
+
+# Exclude generated archives and temp files
+*.zip
+*.tmp

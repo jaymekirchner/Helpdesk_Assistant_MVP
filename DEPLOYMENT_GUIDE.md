@@ -192,7 +192,6 @@ ithelpdesk-pod2-demo/
 ├── tool_data.py              # Mock data
 ├── requirements.txt          # Python dependencies (updated)
 ├── startup.sh                # Startup script (NEW)
-├── .env.example              # Configuration template (NEW)
 ├── DEPLOYMENT_GUIDE.md       # This file
 ├── Readme.md                 # Original README
 ├── tickets.jsonl             # Ticket storage
