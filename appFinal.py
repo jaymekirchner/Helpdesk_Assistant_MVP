@@ -690,14 +690,18 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
 
 
     # ── Step 1: Triage ──────────────────────────────────────────
-    try:
-        triage_response = await triage_agent.run(triage_prompt)
-        triage_raw = triage_response.text.strip()
-        print(f"[Orchestrator] Triage: {triage_raw}")
-        triage_data = json.loads(triage_raw)
-    except Exception as e:
-        print(f"[Orchestrator] Triage failed: {e} — defaulting to knowledge route")
+    if triage_agent is None:
+        print("[Orchestrator] Triage agent unavailable — defaulting to knowledge route")
         triage_data = {"route_to": "knowledge", "urgency": "medium", "category": "General"}
+    else:
+        try:
+            triage_response = await triage_agent.run(triage_prompt)
+            triage_raw = triage_response.text.strip()
+            print(f"[Orchestrator] Triage: {triage_raw}")
+            triage_data = json.loads(triage_raw)
+        except Exception as e:
+            print(f"[Orchestrator] Triage failed: {e} — defaulting to knowledge route")
+            triage_data = {"route_to": "knowledge", "urgency": "medium", "category": "General"}
 
     route_to = triage_data.get("route_to", "knowledge")
     urgency  = triage_data.get("urgency", "medium")
@@ -726,6 +730,11 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
     # ── Step 3a: Knowledge Agent ─────────────────────────────────
     if route_to == "knowledge":
         print("[Orchestrator] Dispatching → KnowledgeAgent")
+        if knowledge_agent is None:
+            return (
+                "Knowledge agent is unavailable because backend AI components failed to initialize. "
+                "Please check app settings and startup logs."
+            )
 
         # Deterministic retrieval: enrich query with history, then fetch docs from Azure Search
         enriched_query = build_retrieval_query(user_input, conversation_history)
@@ -773,6 +782,8 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
     # ── Step 3b: Action Agent ─────────────────────────────────────
     if route_to == "action":
         print("[Orchestrator] Dispatching → ActionAgent")
+        if action_agent is None:
+            return "Action agent is unavailable because Azure OpenAI settings are missing or invalid."
         try:
             action_response = await action_agent.run(user_input)
             return action_response.text.strip()

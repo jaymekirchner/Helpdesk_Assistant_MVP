@@ -4,6 +4,7 @@ python-dotenv>=1.0.0
 pydantic>=2.0.0
 requests>=2.31.0
 streamlit>=1.28.0
-agent_framework==1.0.0
+agent-framework-core==1.0.0
+agent-framework-openai==1.0.0
 fastmcp>=0.1.0
 psycopg2-binary>=2.9.0
