@@ -46,7 +46,15 @@ except Exception:
         "[Startup Warning] agent_framework.tool unavailable; using no-op tool decorator.",
         file=sys.stderr,
     )
-from agent_framework.openai import OpenAIChatCompletionClient
+
+try:
+    from agent_framework.openai import OpenAIChatCompletionClient
+except Exception as e:
+    OpenAIChatCompletionClient = None
+    print(
+        f"[Startup Warning] agent_framework.openai unavailable: {e}",
+        file=sys.stderr,
+    )
 
 load_dotenv()
 
@@ -385,7 +393,7 @@ def create_ticket(
 triage_agent = None
 knowledge_agent = None
 action_agent = None
-if OPENAI_ENDPOINT and OPENAI_KEY and OPENAI_DEPLOYMENT:
+if OPENAI_ENDPOINT and OPENAI_KEY and OPENAI_DEPLOYMENT and OpenAIChatCompletionClient is not None:
     triage_agent = OpenAIChatCompletionClient(
         model=OPENAI_DEPLOYMENT,
         azure_endpoint=OPENAI_ENDPOINT,
