@@ -6,7 +6,7 @@
 set -euo pipefail
 
 echo "🚀 IT Helpdesk Assistant - Starting up..."
-echo "Environment: $ENVIRONMENT"
+echo "Environment: ${ENVIRONMENT:-unknown}"
 echo "App Domain: ithelpdesk-pod2-demo.azurewebsites.net"
 
 # Create necessary directories
