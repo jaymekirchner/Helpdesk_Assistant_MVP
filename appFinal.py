@@ -179,32 +179,44 @@ MAF_ACTION_INSTRUCTIONS = (
     "10. Keep the final answer concise and professional."
 )
 
-if not all([
-    SEARCH_ENDPOINT,
-    SEARCH_KEY,
-    SEARCH_INDEX,
-    OPENAI_ENDPOINT,
-    OPENAI_KEY,
-    OPENAI_DEPLOYMENT,
-]):
-    print("Missing required environment variables. Please check your .env file.")
-    sys.exit(1)
+_MISSING_STARTUP_VARS = [
+    name for name, value in {
+        "AZURE_SEARCH_ENDPOINT": SEARCH_ENDPOINT,
+        "AZURE_SEARCH_KEY": SEARCH_KEY,
+        "AZURE_SEARCH_INDEX": SEARCH_INDEX,
+        "AZURE_OPENAI_ENDPOINT": OPENAI_ENDPOINT,
+        "AZURE_OPENAI_API_KEY": OPENAI_KEY,
+        "AZURE_OPENAI_DEPLOYMENT": OPENAI_DEPLOYMENT,
+    }.items()
+    if not value
+]
+
+if _MISSING_STARTUP_VARS:
+    print(
+        "[Startup Warning] Missing environment variables: "
+        + ", ".join(_MISSING_STARTUP_VARS)
+        + ". App will start in degraded mode."
+    )
 
 # ============================================================
 # Clients
 # ============================================================
-search_client = SearchClient(
-    endpoint=SEARCH_ENDPOINT,
-    index_name=SEARCH_INDEX,
-    credential=AzureKeyCredential(SEARCH_KEY)
-)
+search_client = None
+if SEARCH_ENDPOINT and SEARCH_KEY and SEARCH_INDEX:
+    search_client = SearchClient(
+        endpoint=SEARCH_ENDPOINT,
+        index_name=SEARCH_INDEX,
+        credential=AzureKeyCredential(SEARCH_KEY)
+    )
 
 # Keep AzureOpenAI for your existing retrieval/generation layers
-openai_client = AzureOpenAI(
-    api_key=OPENAI_KEY,
-    api_version=OPENAI_API_VERSION,
-    azure_endpoint=OPENAI_ENDPOINT
-)
+openai_client = None
+if OPENAI_ENDPOINT and OPENAI_KEY and OPENAI_DEPLOYMENT:
+    openai_client = AzureOpenAI(
+        api_key=OPENAI_KEY,
+        api_version=OPENAI_API_VERSION,
+        azure_endpoint=OPENAI_ENDPOINT
+    )
 
 _MCP_MAX_RETRIES = 3
 _MCP_RETRY_BACKOFF = [0.5, 1.5, 3.0]  # seconds between attempts
@@ -358,38 +370,42 @@ def create_ticket(
 # MAF AGENTS
 # ============================================================
 
-triage_agent = OpenAIChatCompletionClient(
-    model=OPENAI_DEPLOYMENT,
-    azure_endpoint=OPENAI_ENDPOINT,
-    api_version=OPENAI_API_VERSION,
-    api_key=OPENAI_KEY,
-).as_agent(
-    name="TriageAgent",
-    instructions=MAF_TRIAGE_INSTRUCTIONS,
-    tools=[],
-)
+triage_agent = None
+knowledge_agent = None
+action_agent = None
+if OPENAI_ENDPOINT and OPENAI_KEY and OPENAI_DEPLOYMENT:
+    triage_agent = OpenAIChatCompletionClient(
+        model=OPENAI_DEPLOYMENT,
+        azure_endpoint=OPENAI_ENDPOINT,
+        api_version=OPENAI_API_VERSION,
+        api_key=OPENAI_KEY,
+    ).as_agent(
+        name="TriageAgent",
+        instructions=MAF_TRIAGE_INSTRUCTIONS,
+        tools=[],
+    )
 
-knowledge_agent = OpenAIChatCompletionClient(
-    model=OPENAI_DEPLOYMENT,
-    azure_endpoint=OPENAI_ENDPOINT,
-    api_version=OPENAI_API_VERSION,
-    api_key=OPENAI_KEY,
-).as_agent(
-    name="KnowledgeAgent",
-    instructions=MAF_KNOWLEDGE_INSTRUCTIONS,
-    tools=[],
-)
+    knowledge_agent = OpenAIChatCompletionClient(
+        model=OPENAI_DEPLOYMENT,
+        azure_endpoint=OPENAI_ENDPOINT,
+        api_version=OPENAI_API_VERSION,
+        api_key=OPENAI_KEY,
+    ).as_agent(
+        name="KnowledgeAgent",
+        instructions=MAF_KNOWLEDGE_INSTRUCTIONS,
+        tools=[],
+    )
 
-action_agent = OpenAIChatCompletionClient(
-    model=OPENAI_DEPLOYMENT,
-    azure_endpoint=OPENAI_ENDPOINT,
-    api_version=OPENAI_API_VERSION,
-    api_key=OPENAI_KEY,
-).as_agent(
-    name="ActionAgent",
-    instructions=MAF_ACTION_INSTRUCTIONS,
-    tools=[lookup_user, check_device_status, create_ticket],
-)
+    action_agent = OpenAIChatCompletionClient(
+        model=OPENAI_DEPLOYMENT,
+        azure_endpoint=OPENAI_ENDPOINT,
+        api_version=OPENAI_API_VERSION,
+        api_key=OPENAI_KEY,
+    ).as_agent(
+        name="ActionAgent",
+        instructions=MAF_ACTION_INSTRUCTIONS,
+        tools=[lookup_user, check_device_status, create_ticket],
+    )
 
 # ════════════════════════════════════════════════════
 # LAYER 1 — RETRIEVAL QUERY BUILDER
@@ -772,6 +788,8 @@ async def handle_user_message(user_input, conversation_history):
     )
     if is_confirmation:
         print("[Agent Controller] Decision → TICKET CONFIRMATION → ActionAgent")
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
         ctx = extract_ticket_context(conversation_history)
         tool_prompt = build_ticket_prompt(ctx)
         print(f"[DEBUG] Ticket prompt sent to agent: {tool_prompt}")
@@ -800,6 +818,8 @@ async def handle_user_message(user_input, conversation_history):
                 "Call create_ticket now with these exact values."
             )
             print(f"[Agent Controller] Auto-creating ticket from user reply: {ticket_prompt}")
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
 

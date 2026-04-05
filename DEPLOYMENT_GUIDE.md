@@ -74,7 +74,7 @@ Linux App Service note:
 cd /path/to/Helpdesk_Assistant_MVP
 
 # Add Azure remote
-az webapp deployment source config-zip -g <resource-group> -n ithelpdesk-pod2-demo --src deployment.zip
+az webapp deployment source config-zip -g ai-bootcamp-openai-pod2 -n ithelpdesk-pod2-demo --src deployment.zip
 
 # Or use Git:
 git remote add azure https://<deployment-user>@ithelpdesk-pod2-demo.scm.azurewebsites.net/ithelpdesk-pod2-demo.git
@@ -89,7 +89,7 @@ zip -r deployment.zip . -x "\.venv/*" "\.git/*" "__pycache__/*" "*.pyc" ".env" "
 
 # Deploy
 az webapp deployment source config-zip \
-  --resource-group <your-resource-group> \
+   --resource-group ai-bootcamp-openai-pod2 \
   --name ithelpdesk-pod2-demo \
   --src deployment.zip
 ```
@@ -210,7 +210,7 @@ ithelpdesk-pod2-demo/
 2. Check PostgreSQL firewall rules allow App Service IP
 3. See Application Logs:
    ```bash
-   az webapp log tail -n ithelpdesk-pod2-demo -g <resource-group>
+   az webapp log tail -n ithelpdesk-pod2-demo -g ai-bootcamp-openai-pod2
    ```
 
 ### Issue: Streamlit times out loading
@@ -253,7 +253,7 @@ ithelpdesk-pod2-demo/
 ```bash
 # Auto-scale based on CPU
 az appservice plan update --name <plan-name> \
-  --resource-group <group> \
+   --resource-group ai-bootcamp-openai-pod2 \
   --sku P1V2
 ```
 
@@ -290,7 +290,7 @@ curl -X POST https://ithelpdesk-pod2-demo.azurewebsites.net/api/chat \
   -d '{"message": "test"}'
 
 # Check application logs
-az webapp log tail -n ithelpdesk-pod2-demo -g <resource-group>
+az webapp log tail -n ithelpdesk-pod2-demo -g ai-bootcamp-openai-pod2
 ```
 
 ---
@@ -300,7 +300,7 @@ az webapp log tail -n ithelpdesk-pod2-demo -g <resource-group>
 1. **Enable Application Insights** for monitoring:
    ```bash
    az webapp config appsettings set -n ithelpdesk-pod2-demo \
-     -g <resource-group> \
+      -g ai-bootcamp-openai-pod2 \
      --settings APPINSIGHTS_INSTRUMENTATIONKEY=<key>
    ```
 

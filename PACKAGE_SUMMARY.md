@@ -82,7 +82,7 @@ git push azure main
 # Option B: ZIP deployment
 zip -r deployment.zip . -x ".venv/*" ".git/*" "__pycache__/*" "*.pyc" ".env"
 az webapp deployment source config-zip \
-  -g <resource-group> \
+  -g ai-bootcamp-openai-pod2 \
   -n ithelpdesk-pod2-demo \
   --src deployment.zip
 ```
@@ -226,7 +226,7 @@ STREAMLIT_SERVER_ENABLEXSRFPROTECTION=false
 - **Cause:** Port 8000 not accessible or server crashed
 - **Fix:** Check logs:
   ```bash
-  az webapp log tail -n ithelpdesk-pod2-demo -g <resource-group>
+  az webapp log tail -n ithelpdesk-pod2-demo -g ai-bootcamp-openai-pod2
   ```
 
 ### "psycopg2 ImportError"
