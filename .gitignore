@@ -1,7 +1,33 @@
-# Ignore all .env files in the root directory
+# Environment files
 .env
+.env.local
 .venv
 .DS_Store
 __pycache__/
 *.py[cod]
 .python-version
+
+# Deployment artifacts
+*.log
+python.log
+deployment.zip
+dist/
+build/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# Azure & Streamlit
+.azure/
+/.streamlit/
+local.settings.json
+
+# Egg info
+*.egg-info/
+.installed.cfg
+*.egg
