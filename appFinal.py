@@ -102,7 +102,24 @@ TOOL_REQUEST_SIGNALS = [
     "open a ticket",
     "raise ticket",
     "raise a ticket",
+    "lookup ticket",
+    "look up ticket",
+    "ticket status",
+    "ticket details",
+    "check ticket",
     "escalate"
+]
+
+TICKET_LOOKUP_SIGNALS = [
+    "lookup ticket",
+    "look up ticket",
+    "ticket status",
+    "ticket details",
+    "check ticket",
+    "ticket info",
+    "ticket information",
+    "find ticket",
+    "search ticket",
 ]
 
 TICKET_REQUEST_SIGNALS = [
@@ -158,6 +175,24 @@ LOOKUP_DISAMBIGUATE_PROMPT = (
 LOOKUP_NEXT_ACTION_PROMPT = (
     "What would you like to do next? Reply with 'device' to check device details "
     "or 'ticket' to create a support ticket."
+)
+KB_TICKET_IDENTITY_METHOD_PROMPT = (
+    "To open a support ticket I'll need to identify you. "
+    "Would you like to provide your username or your email address? "
+    "Please reply with 'username' or 'email'."
+)
+KB_TICKET_USERNAME_INPUT_PROMPT = "Please provide your username (for example, john.doe)."
+KB_TICKET_EMAIL_INPUT_PROMPT = "Please provide your email address."
+TICKET_LOOKUP_NUMBER_PROMPT = (
+    "Please provide the ticket number you'd like to look up (for example, 12345)."
+)
+TICKET_LOOKUP_METHOD_PROMPT = (
+    "Would you like to look up a ticket by ticket number, or get all tickets for a specific user? "
+    "Reply with 'number' or 'user'."
+)
+TICKET_LOOKUP_USER_PROMPT = (
+    "Please provide the username (for example, john.doe) or full name (for example, John Doe) "
+    "of the user to retrieve tickets for."
 )
 
 MAF_TRIAGE_INSTRUCTIONS = (
@@ -244,7 +279,17 @@ MAF_ACTION_INSTRUCTIONS = (
     "    - Ask: 'What would you like to do next? Reply with \\'device\\' to check device details "
     "or \\'ticket\\' to create a support ticket.'\n"
     "    - Do NOT automatically proceed to check device status or create a ticket.\n"
-    "    - Wait for the user's explicit choice before calling any further tools."
+    "    - Wait for the user's explicit choice before calling any further tools.\n"
+    "14. Use lookup_ticket to retrieve details for an existing support ticket by its ticket ID.\n"
+    "    - Display all returned fields: ticket_id, subject, status, severity, category, type,\n"
+    "      assignment_group, created_at, and the associated user's first name, last name, and email.\n"
+    "    - Do NOT ask for user identity or device details when looking up a ticket.\n"
+    "    - If the ticket_id is not provided, ask: 'Please provide the ticket number you\'d like to look up.'\n"
+    "15. Use lookup_tickets_by_user to retrieve all tickets for a given user.\n"
+    "    - Pass username if available, or first_name + last_name if the username is unknown.\n"
+    "    - Display all returned tickets with their full details (ticket_id, subject, status, severity,\n"
+    "      category, type, assignment_group, created_at, user name, and email).\n"
+    "    - Do NOT ask for a specific ticket_id when the request is for all tickets for a user."
 )
 
 _MISSING_STARTUP_VARS = [
@@ -417,6 +462,84 @@ def check_device_status(
 
 
 @tool(
+    name="lookup_ticket",
+    description="Look up an existing support ticket by ticket ID. Returns status, category, subject, and the associated user's name and email."
+)
+def lookup_ticket(
+    ticket_id: Annotated[str, Field(description="The ticket ID or ticket number to look up")],
+) -> str:
+    try:
+        result = _call_mcp_tool("lookup_ticket", {"ticket_id": ticket_id})
+        records = _extract_mcp_records(result)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "Ticket lookup failed."
+        data = envelope.get("data") or {}
+        full_name = " ".join(filter(None, [data.get("first_name"), data.get("last_name")])).strip() or "Unknown"
+        return (
+            "Ticket details:\n"
+            f"- Ticket ID: {data.get('ticket_id', 'Unknown')}\n"
+            f"- Subject: {data.get('subject', 'Unknown')}\n"
+            f"- Status: {data.get('status', 'Unknown')}\n"
+            f"- Severity: {data.get('severity', 'Unknown')}\n"
+            f"- Category: {data.get('category', 'Unknown')}\n"
+            f"- Type: {data.get('ticket_type', 'Unknown')}\n"
+            f"- Assignment Group: {data.get('assignment_group', 'Unknown')}\n"
+            f"- Created At: {data.get('created_at', 'Unknown')}\n"
+            f"- User: {full_name}\n"
+            f"- Email: {data.get('email', 'Unknown')}"
+        )
+    except Exception as e:
+        return f"Error looking up ticket via MCP: {str(e)}"
+
+
+@tool(
+    name="lookup_tickets_by_user",
+    description="Look up all support tickets for a specific user by username or first and last name."
+)
+def lookup_tickets_by_user(
+    username: Annotated[str, Field(description="Employee username, e.g. john.doe. Use when username is known.")] = "",
+    first_name: Annotated[str, Field(description="Employee first name. Use with last_name when username is unknown.")] = "",
+    last_name: Annotated[str, Field(description="Employee last name. Use with first_name when username is unknown.")] = "",
+) -> str:
+    try:
+        result = _call_mcp_tool(
+            "lookup_tickets_by_user",
+            {"username": username, "first_name": first_name, "last_name": last_name},
+        )
+        records = _extract_mcp_records(result)
+        envelope = records[0] if records else {}
+        if not isinstance(envelope, dict):
+            return str(envelope)
+        if not envelope.get("success"):
+            return envelope.get("error") or "Ticket lookup by user failed."
+        tickets = envelope.get("data") or []
+        if not tickets:
+            return "No tickets found for that user."
+        lines = [f"Found {len(tickets)} ticket(s):"]
+        for i, t in enumerate(tickets, 1):
+            full_name = " ".join(filter(None, [t.get("first_name"), t.get("last_name")])).strip() or "Unknown"
+            lines.append(
+                f"\nTicket {i}:\n"
+                f"- Ticket ID: {t.get('ticket_id', 'Unknown')}\n"
+                f"- Subject: {t.get('subject', 'Unknown')}\n"
+                f"- Status: {t.get('status', 'Unknown')}\n"
+                f"- Severity: {t.get('severity', 'Unknown')}\n"
+                f"- Category: {t.get('category', 'Unknown')}\n"
+                f"- Type: {t.get('ticket_type', 'Unknown')}\n"
+                f"- Assignment Group: {t.get('assignment_group', 'Unknown')}\n"
+                f"- Created At: {t.get('created_at', 'Unknown')}\n"
+                f"- User: {full_name}\n"
+                f"- Email: {t.get('email', 'Unknown')}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error looking up tickets by user via MCP: {str(e)}"
+
+
+@tool(
     name="create_ticket",
     description="Create an IT support ticket when the issue is unresolved or the user asks to open a ticket."
 )
@@ -496,7 +619,7 @@ if OPENAI_ENDPOINT and OPENAI_KEY and OPENAI_DEPLOYMENT and OpenAIChatCompletion
     ).as_agent(
         name="ActionAgent",
         instructions=MAF_ACTION_INSTRUCTIONS,
-        tools=[lookup_user, check_device_status, create_ticket],
+        tools=[lookup_user, check_device_status, create_ticket, lookup_ticket, lookup_tickets_by_user],
     )
 
 # ════════════════════════════════════════════════════
@@ -794,6 +917,78 @@ def last_assistant_asked_for_lookup_next_action(conversation_history) -> bool:
     return False
 
 
+def last_assistant_asked_for_kb_ticket_identity_method(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked username-or-email in the KB ticket flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return KB_TICKET_IDENTITY_METHOD_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_kb_ticket_username(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for username in the KB ticket flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return KB_TICKET_USERNAME_INPUT_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_kb_ticket_email(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for email in the KB ticket flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return KB_TICKET_EMAIL_INPUT_PROMPT.lower() in content
+    return False
+
+
+def looks_like_ticket_lookup_request(user_input: str) -> bool:
+    """Return True for explicit ticket lookup requests."""
+    msg = user_input.lower()
+    return any(s in msg for s in TICKET_LOOKUP_SIGNALS)
+
+
+def extract_ticket_id_from_input(user_input: str) -> str:
+    """Extract a numeric ticket ID from user input, if present."""
+    match = re.search(r"\b(\d{4,})\b", user_input)
+    return match.group(1) if match else ""
+
+
+def last_assistant_asked_for_ticket_number(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for a ticket number."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return TICKET_LOOKUP_NUMBER_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_ticket_lookup_method(conversation_history) -> bool:
+    """Return True when the most recent assistant message presented the ticket lookup method choice."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return TICKET_LOOKUP_METHOD_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_ticket_lookup_user(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for a username/name for ticket-by-user lookup."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return TICKET_LOOKUP_USER_PROMPT.lower() in content
+    return False
+
+
 def get_username_from_lookup_result(conversation_history) -> str:
     """Extract the username from the most recent 'User found:' or single-match assistant message."""
     for message in reversed(conversation_history):
@@ -1068,6 +1263,44 @@ async def handle_user_message(user_input, conversation_history):
                 print("[Agent Controller] Repeated input detected — re-sending last assistant response.")
                 return last_assistant_msg, True
 
+    # Pre-check: KB ticket flow — email value received
+    if conversation_history and last_assistant_asked_for_kb_ticket_email(conversation_history):
+        email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b", user_input)
+        if not email_match:
+            return "That doesn't look like a valid email address. Please try again.", True
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        ctx = extract_ticket_context(conversation_history)
+        ctx["user"] = email_match.group(0)
+        tool_prompt = build_ticket_prompt(ctx)
+        print(f"[DEBUG] KB escalation ticket prompt (email): {tool_prompt}")
+        action_response = await action_agent.run(tool_prompt)
+        return action_response.text, True
+
+    # Pre-check: KB ticket flow — username value received
+    if conversation_history and last_assistant_asked_for_kb_ticket_username(conversation_history):
+        username = user_input.strip()
+        if not username:
+            return KB_TICKET_USERNAME_INPUT_PROMPT, True
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        ctx = extract_ticket_context(conversation_history)
+        ctx["user"] = normalize_lookup_username(username, "username")
+        tool_prompt = build_ticket_prompt(ctx)
+        print(f"[DEBUG] KB escalation ticket prompt (username): {tool_prompt}")
+        action_response = await action_agent.run(tool_prompt)
+        return action_response.text, True
+
+    # Pre-check: KB ticket flow — method choice (username vs email)
+    if conversation_history and last_assistant_asked_for_kb_ticket_identity_method(conversation_history):
+        choice = user_input.strip().lower()
+        if "username" in choice:
+            return KB_TICKET_USERNAME_INPUT_PROMPT, True
+        elif "email" in choice:
+            return KB_TICKET_EMAIL_INPUT_PROMPT, True
+        else:
+            return KB_TICKET_IDENTITY_METHOD_PROMPT, True  # re-ask if unclear
+
     # Pre-check: ticket confirmation following a prior escalation offer
     is_confirmation = (
         looks_like_ticket_confirmation(user_input)
@@ -1078,6 +1311,9 @@ async def handle_user_message(user_input, conversation_history):
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
         ctx = extract_ticket_context(conversation_history)
+        if ctx["user"] == "unknown":
+            print("[Agent Controller] User identity unknown — requesting identity method before ticket creation")
+            return KB_TICKET_IDENTITY_METHOD_PROMPT, True
         tool_prompt = build_ticket_prompt(ctx)
         print(f"[DEBUG] Ticket prompt sent to agent: {tool_prompt}")
         action_response = await action_agent.run(tool_prompt)
@@ -1232,6 +1468,61 @@ async def handle_user_message(user_input, conversation_history):
             return LOOKUP_FIRST_NAME_PROMPT, True
         else:
             return LOOKUP_METHOD_PROMPT, True  # re-ask if response was unclear
+
+    # Ticket number received — perform ticket lookup
+    if conversation_history and last_assistant_asked_for_ticket_number(conversation_history):
+        ticket_id = extract_ticket_id_from_input(user_input) or user_input.strip()
+        if not ticket_id:
+            return TICKET_LOOKUP_NUMBER_PROMPT, True
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        print(f"[Agent Controller] Decision → LOOKUP TICKET: {ticket_id}")
+        ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
+        action_response = await action_agent.run(ticket_prompt)
+        return action_response.text, True
+
+    # Ticket-by-user identity received — look up all tickets for that user
+    if conversation_history and last_assistant_asked_for_ticket_lookup_user(conversation_history):
+        identity_value, identity_kind = extract_identity_value(user_input)
+        if identity_value:
+            lookup_username = normalize_lookup_username(identity_value, identity_kind)
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (username): {lookup_username}")
+            ticket_prompt = f"Use lookup_tickets_by_user with username='{lookup_username}'. Display all the tickets returned."
+            action_response = await action_agent.run(ticket_prompt)
+            return action_response.text, True
+        first_name, last_name = extract_first_last_name(user_input)
+        if first_name and last_name:
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (name): {first_name} {last_name}")
+            ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
+            action_response = await action_agent.run(ticket_prompt)
+            return action_response.text, True
+        return TICKET_LOOKUP_USER_PROMPT, True  # re-ask if identity couldn't be parsed
+
+    # Ticket lookup method choice received — route to number or user sub-flow
+    if conversation_history and last_assistant_asked_for_ticket_lookup_method(conversation_history):
+        choice = user_input.strip().lower()
+        if "number" in choice or choice == "1":
+            return TICKET_LOOKUP_NUMBER_PROMPT, True
+        elif "user" in choice or choice == "2":
+            return TICKET_LOOKUP_USER_PROMPT, True
+        else:
+            return TICKET_LOOKUP_METHOD_PROMPT, True  # re-ask if unclear
+
+    # Ticket lookup request — extract ticket ID from message or prompt for lookup method
+    if looks_like_ticket_lookup_request(user_input):
+        ticket_id = extract_ticket_id_from_input(user_input)
+        if ticket_id:
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+            print(f"[Agent Controller] Decision → LOOKUP TICKET (inline): {ticket_id}")
+            ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
+            action_response = await action_agent.run(ticket_prompt)
+            return action_response.text, True
+        return TICKET_LOOKUP_METHOD_PROMPT, True
 
     # Step 1: Direct lookup request — start method selection
     if looks_like_direct_lookup_request(user_input):

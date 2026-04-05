@@ -369,6 +369,114 @@ def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -
 
 
 @mcp.tool
+def lookup_ticket(ticket_id: str) -> dict:
+    """Look up ticket details from demo.tickets joined with demo.users for requester contact info."""
+    if not ticket_id or not ticket_id.strip():
+        return {"success": False, "error": "Provide a ticket_id.", "data": None}
+    conn_str = _postgres_conn_string()
+    if not conn_str:
+        return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
+    try:
+        with psycopg2.connect(conn_str) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT t.ticket_id, t.severity, t.status, t.assignment_group,
+                           t.category, t.created_at, t.subject, t.description_text, t.ticket_type,
+                           u.first_name, u.last_name, u.email
+                    FROM demo.tickets t
+                    LEFT JOIN demo.users u ON u.user_id = t.user_id
+                    WHERE t.ticket_id = %s
+                    """,
+                    (ticket_id.strip(),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"success": False, "error": f"No ticket found with ID '{ticket_id}'.", "data": None}
+                return {
+                    "success": True,
+                    "error": None,
+                    "data": {
+                        "ticket_id": row[0],
+                        "severity": row[1],
+                        "status": row[2],
+                        "assignment_group": row[3],
+                        "category": row[4],
+                        "created_at": str(row[5]) if row[5] else None,
+                        "subject": row[6],
+                        "description_text": row[7],
+                        "ticket_type": row[8],
+                        "first_name": row[9],
+                        "last_name": row[10],
+                        "email": row[11],
+                    },
+                }
+    except psycopg2.Error as e:
+        return {"success": False, "error": f"Database error: {e}", "data": None}
+
+
+@mcp.tool
+def lookup_tickets_by_user(username: str = "", first_name: str = "", last_name: str = "") -> dict:
+    """Look up all support tickets for a user by username OR first and last name."""
+    username = (username or "").strip()
+    first_name = (first_name or "").strip()
+    last_name = (last_name or "").strip()
+    if not username and not (first_name and last_name):
+        return {"success": False, "error": "Provide a username or both first_name and last_name.", "data": None}
+    conn_str = _postgres_conn_string()
+    if not conn_str:
+        return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
+    try:
+        with psycopg2.connect(conn_str) as conn:
+            with conn.cursor() as cur:
+                conditions = []
+                params = []
+                if username:
+                    conditions.append("u.username = %s")
+                    params.append(username)
+                if first_name and last_name:
+                    conditions.append("(u.first_name ILIKE %s AND u.last_name ILIKE %s)")
+                    params.extend([first_name, last_name])
+                where_clause = " OR ".join(conditions)
+                cur.execute(
+                    f"""
+                    SELECT t.ticket_id, t.severity, t.status, t.assignment_group,
+                           t.category, t.created_at, t.subject, t.description_text, t.ticket_type,
+                           u.first_name, u.last_name, u.email, u.username
+                    FROM demo.tickets t
+                    LEFT JOIN demo.users u ON u.user_id = t.user_id
+                    WHERE {where_clause}
+                    ORDER BY t.created_at DESC
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    return {"success": False, "error": "No tickets found for that user.", "data": None}
+                tickets = [
+                    {
+                        "ticket_id": r[0],
+                        "severity": r[1],
+                        "status": r[2],
+                        "assignment_group": r[3],
+                        "category": r[4],
+                        "created_at": str(r[5]) if r[5] else None,
+                        "subject": r[6],
+                        "description_text": r[7],
+                        "ticket_type": r[8],
+                        "first_name": r[9],
+                        "last_name": r[10],
+                        "email": r[11],
+                        "username": r[12],
+                    }
+                    for r in rows
+                ]
+                return {"success": True, "error": None, "data": tickets}
+    except psycopg2.Error as e:
+        return {"success": False, "error": f"Database error: {e}", "data": None}
+
+
+@mcp.tool
 def check_device_status(device_or_username: str) -> dict:
     """Check device state by device ID or username (Postgres only)."""
     conn = _postgres_conn_string()
