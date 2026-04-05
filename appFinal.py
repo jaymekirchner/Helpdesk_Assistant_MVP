@@ -195,8 +195,10 @@ TICKET_LOOKUP_METHOD_PROMPT = (
     "Reply with 'number', 'username', or 'name'."
 )
 TICKET_LOOKUP_USER_PROMPT = (
-    "Please provide the first and last name (for example, John Doe) "
-    "of the user to retrieve tickets for."
+    "Please provide the first name of the user to retrieve tickets for."
+)
+TICKET_LOOKUP_USER_LAST_NAME_PROMPT = (
+    "Please provide the last name of the user to retrieve tickets for."
 )
 TICKET_LOOKUP_USERNAME_PROMPT = (
     "Please provide the username (for example, john.doe) to retrieve tickets for."
@@ -1013,6 +1015,46 @@ def last_assistant_asked_for_ticket_lookup_user(conversation_history) -> bool:
     return False
 
 
+def last_assistant_asked_for_ticket_lookup_username(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for username in the ticket-by-user flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        return TICKET_LOOKUP_USERNAME_PROMPT.lower() in (message.get("content") or "").lower()
+    return False
+
+
+def last_assistant_asked_for_ticket_lookup_first_name(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for first name in the ticket-by-user flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        return TICKET_LOOKUP_USER_PROMPT.lower() in (message.get("content") or "").lower()
+    return False
+
+
+def last_assistant_asked_for_ticket_lookup_last_name(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for last name in the ticket-by-user flow."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        return TICKET_LOOKUP_USER_LAST_NAME_PROMPT.lower() in (message.get("content") or "").lower()
+    return False
+
+
+def get_ticket_lookup_first_name_from_history(conversation_history) -> str:
+    """Return the user reply that followed the ticket lookup first-name prompt."""
+    for i, msg in enumerate(conversation_history):
+        if (
+            msg.get("role") == "assistant"
+            and TICKET_LOOKUP_USER_PROMPT.lower() in (msg.get("content") or "").lower()
+            and i + 1 < len(conversation_history)
+            and conversation_history[i + 1].get("role") == "user"
+        ):
+            return conversation_history[i + 1].get("content", "").strip()
+    return ""
+
+
 def get_username_from_lookup_result(conversation_history) -> str:
     """Extract the username from the most recent 'User found:' or single-match assistant message."""
     for message in reversed(conversation_history):
@@ -1524,8 +1566,26 @@ async def handle_user_message(user_input, conversation_history):
         action_response = await action_agent.run(ticket_prompt)
         return action_response.text, True
 
-    # Ticket-by-user identity received — look up all tickets for that user
-    if conversation_history and last_assistant_asked_for_ticket_lookup_user(conversation_history):
+    # Ticket-by-user last name received — complete the name-based ticket lookup
+    if conversation_history and last_assistant_asked_for_ticket_lookup_last_name(conversation_history):
+        last_name = user_input.strip()
+        first_name = get_ticket_lookup_first_name_from_history(conversation_history)
+        if first_name and last_name:
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (name): {first_name} {last_name}")
+            ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
+            action_response = await action_agent.run(ticket_prompt)
+            return action_response.text, True
+        return TICKET_LOOKUP_USER_LAST_NAME_PROMPT, True
+
+    # Ticket-by-user first name received — ask for last name
+    if conversation_history and last_assistant_asked_for_ticket_lookup_first_name(conversation_history):
+        print("[Agent Controller] Decision → TICKET LOOKUP BY NAME → first name received, prompting for last name")
+        return TICKET_LOOKUP_USER_LAST_NAME_PROMPT, True
+
+    # Ticket-by-username received — look up tickets by username
+    if conversation_history and last_assistant_asked_for_ticket_lookup_username(conversation_history):
         identity_value, identity_kind = extract_identity_value(user_input)
         if identity_value:
             lookup_username = normalize_lookup_username(identity_value, identity_kind)
@@ -1535,15 +1595,7 @@ async def handle_user_message(user_input, conversation_history):
             ticket_prompt = f"Use lookup_tickets_by_user with username='{lookup_username}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
-        first_name, last_name = extract_first_last_name(user_input)
-        if first_name and last_name:
-            if not action_agent:
-                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (name): {first_name} {last_name}")
-            ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
-            action_response = await action_agent.run(ticket_prompt)
-            return action_response.text, True
-        return TICKET_LOOKUP_USER_PROMPT, True  # re-ask if identity couldn't be parsed
+        return TICKET_LOOKUP_USERNAME_PROMPT, True  # re-ask if identity couldn't be parsed
 
     # Ticket lookup method choice received — route to number or user sub-flow
     if conversation_history and last_assistant_asked_for_ticket_lookup_method(conversation_history):
