@@ -140,6 +140,10 @@ TICKET_CONFIRMATION_SIGNALS = [
     "please do raise a ticket"
 ]
 
+IDENTITY_LOOKUP_PROMPT = (
+    "Thanks. Please provide either your username or your email so I can look up your account details."
+)
+
 MAF_TRIAGE_INSTRUCTIONS = (
     "You are an IT Helpdesk triage agent.\n\n"
     "Your job is to read the user's request and conversation history, classify the issue, "
@@ -585,6 +589,64 @@ def last_assistant_offered_escalation(conversation_history):
     return False
 
 
+def last_assistant_requested_name_fields(conversation_history):
+    """Return True when the most recent assistant message asks for first/last name fields."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return "first name" in content and "last name" in content
+    return False
+
+
+def extract_first_last_name(user_input: str):
+    """Extract first/last names from common reply formats."""
+    explicit = re.search(
+        r"first\s+name\s*(?:is|:)?\s*([A-Za-z'\-]+).*last\s+name\s*(?:is|:)?\s*([A-Za-z'\-]+)",
+        user_input,
+        flags=re.IGNORECASE,
+    )
+    if explicit:
+        return explicit.group(1), explicit.group(2)
+
+    cleaned = re.sub(r"[^A-Za-z'\-\s]", " ", user_input).strip()
+    tokens = [t for t in cleaned.split() if t]
+    if len(tokens) >= 2:
+        return tokens[0], tokens[-1]
+
+    return None, None
+
+
+def last_assistant_requested_identity_for_lookup(conversation_history):
+    """Return True when the most recent assistant message asks for username/email identity."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return "username or your email" in content or "username or email" in content
+    return False
+
+
+def extract_identity_value(user_input: str):
+    """Extract either an email or username value from user input."""
+    email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b", user_input)
+    if email_match:
+        return email_match.group(0), "email"
+
+    username_match = re.search(r"\b[a-zA-Z][a-zA-Z0-9._-]{2,}\b", user_input)
+    if username_match:
+        return username_match.group(0), "username"
+
+    return None, None
+
+
+def normalize_lookup_username(identity_value: str, identity_kind: str) -> str:
+    """Convert provided identity into a username suitable for lookup_user tool."""
+    if identity_kind == "email":
+        return identity_value.split("@", 1)[0].strip().lower()
+    return identity_value.strip().lower()
+
+
 def should_run_escalation_check(response_text):
     """
     Run escalation logic only for explicit unknown-answer outcomes.
@@ -826,6 +888,37 @@ async def handle_user_message(user_input, conversation_history):
         print(f"[DEBUG] Ticket prompt sent to agent: {tool_prompt}")
         action_response = await action_agent.run(tool_prompt)
         return action_response.text, True
+
+    # If assistant asked for username/email identity, use that input for lookup and continue workflow.
+    if conversation_history and last_assistant_requested_identity_for_lookup(conversation_history):
+        identity_value, identity_kind = extract_identity_value(user_input)
+        if not identity_value:
+            return (
+                "I still need either your username or your email to continue account lookup. "
+                "Please provide one of those."
+            ), True
+
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+
+        lookup_username = normalize_lookup_username(identity_value, identity_kind)
+        followup_prompt = (
+            "The user provided account identity details.\n"
+            f"Provided {identity_kind}: {identity_value}\n"
+            f"Username for lookup_user: {lookup_username}\n\n"
+            "Use lookup_user with that username now. "
+            "Then continue the ticket workflow using conversation context and create the ticket when ready."
+        )
+        action_response = await action_agent.run(followup_prompt)
+        return action_response.text, True
+
+    # If the assistant asked for first/last name and user provided them,
+    # force the workflow to continue without re-asking those same fields.
+    if conversation_history and last_assistant_requested_name_fields(conversation_history):
+        first_name, last_name = extract_first_last_name(user_input)
+        if first_name and last_name:
+            print("[Agent Controller] Name fields detected in user reply — continuing action flow.")
+            return IDENTITY_LOOKUP_PROMPT, True
 
     # NEW: If last assistant message was a ticket field request, parse user reply and create ticket
     if conversation_history:
