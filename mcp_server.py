@@ -49,7 +49,21 @@ def health_check() -> dict:
 
 
 def _postgres_conn_string() -> str:
-    return os.getenv("POSTGRES_CONNECTION_STRING", "")
+    """Retrieve Postgres connection string from environment, or construct from components."""
+    conn_str = os.getenv("AZURE_POSTGRESQL_CONNECTIONSTRING", "")
+    if conn_str:
+        return conn_str
+    
+    # Fallback: construct from individual components (for backward compatibility)
+    user = os.getenv("AZURE_POSTGRESQL_USER", "ithelpdesk_pod2_admin")
+    password = os.getenv("AZURE_POSTGRESQL_PASSWORD", "")
+    host = os.getenv("AZURE_POSTGRESQL_HOST", "ithelpdesk-pod2-postgres-db.postgres.database.azure.com")
+    port = os.getenv("AZURE_POSTGRESQL_PORT", "5432")
+    dbname = os.getenv("AZURE_POSTGRESQL_DBNAME", "postgres")
+    
+    if password:
+        return f"dbname={dbname} user={user} password={password} port={port} host={host}"
+    return ""
 
 
 def _freshworks_endpoint() -> str:
@@ -180,7 +194,7 @@ def lookup_user(username: str) -> dict:
     """Look up a corporate user by username (Postgres only)."""
     conn = _postgres_conn_string()
     if not conn:
-        return {"success": False, "error": "POSTGRES_CONNECTION_STRING is not configured.", "data": None}
+        return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTIONSTRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
@@ -212,7 +226,7 @@ def check_device_status(device_or_username: str) -> dict:
     """Check device state by device ID or username (Postgres only)."""
     conn = _postgres_conn_string()
     if not conn:
-        return {"success": False, "error": "POSTGRES_CONNECTION_STRING is not configured.", "data": None}
+        return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTIONSTRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
@@ -256,6 +270,8 @@ def check_device_status(device_or_username: str) -> dict:
 if __name__ == "__main__":
     import sys
     if "--http" in sys.argv:
-        mcp.run(transport="http", host="0.0.0.0", port=8000)
+        mcp_host = os.getenv("MCP_BIND_HOST", "127.0.0.1")
+        mcp_port = int(os.getenv("MCP_PORT", "8000"))
+        mcp.run(transport="http", host=mcp_host, port=mcp_port)
     else:
         mcp.run()  # STDIO transport (default, works with Inspector)

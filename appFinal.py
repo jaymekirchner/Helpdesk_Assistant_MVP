@@ -82,7 +82,7 @@ TOOL_REQUEST_SIGNALS = [
     "open a ticket",
     "raise ticket",
     "raise a ticket",
-    "escalate",
+    "escalate"
 ]
 
 TICKET_REQUEST_SIGNALS = [
@@ -94,7 +94,7 @@ TICKET_REQUEST_SIGNALS = [
     "raise a ticket",
     "escalate this",
     "escalate issue",
-    "escalate",
+    "escalate"
 ]
 
 TICKET_CONFIRMATION_SIGNALS = [
@@ -108,7 +108,16 @@ TICKET_CONFIRMATION_SIGNALS = [
     "open one",
     "raise one",
     "sure",
-    "okay"
+    "okay",
+    "ok",
+    "yes thanks",
+    "yes thank you",
+    "please create a ticket",
+    "please open a ticket",
+    "please raise a ticket",
+    "please do create a ticket",
+    "please do open a ticket",
+    "please do raise a ticket"
 ]
 
 MAF_TRIAGE_INSTRUCTIONS = (
@@ -199,6 +208,7 @@ openai_client = AzureOpenAI(
 
 _MCP_MAX_RETRIES = 3
 _MCP_RETRY_BACKOFF = [0.5, 1.5, 3.0]  # seconds between attempts
+_MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
 
 
 def _call_mcp_tool(tool_name: str, args: dict):
@@ -207,7 +217,7 @@ def _call_mcp_tool(tool_name: str, args: dict):
     import concurrent.futures
 
     async def _call_async():
-        client = Client("http://localhost:8000/mcp")
+        client = Client(_MCP_SERVER_URL)
         async with client:
             return await client.call_tool(tool_name, args)
 
