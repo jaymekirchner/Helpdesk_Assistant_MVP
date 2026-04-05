@@ -184,19 +184,28 @@ MAF_TRIAGE_INSTRUCTIONS = (
     "A query is vague when it lacks the application, OS, error message, or symptoms.\n"
     "Vague examples : 'VPN not working', 'Help me', 'Outlook issue'\n"
     "Specific examples : 'Outlook crashes on Windows 11 when opening attachments', "
-    "'VPN on Mac returns error 619'"
+    "'VPN on Mac returns error 619'\n\n"
+    "Repeated input rule:\n"
+    "If the latest user message is identical or near-identical to their immediately preceding message, "
+    "and the assistant already responded to it, route to 'clarify' and set clarifying_question to: "
+    "'It looks like you sent the same message again. Are you still waiting for something, "
+    "or would you like to rephrase your request?'"
 )
 
 MAF_KNOWLEDGE_INSTRUCTIONS = (
     "You are an IT Helpdesk knowledge agent.\n\n"
-    "The retrieved knowledge base documents are provided directly in the user message under RETRIEVED DOCUMENTS.\n\n"
+    "Your ONLY source of information is the documentation retrieved from Azure AI Search "
+    "and provided in the user message under RETRIEVED DOCUMENTS. "
+    "You have no other knowledge source.\n\n"
     "Rules:\n"
-    "1. Answer using ONLY the documents provided in the prompt. Do not use outside knowledge.\n"
-    "2. If no relevant information is present in the documents, respond with exactly: "
-       "'I do not know based on the knowledge base. Would you like me to connect to IT Support?'\n"
+    "1. Answer using ONLY the content of the RETRIEVED DOCUMENTS provided in the prompt.\n"
+    "   - Do NOT use general knowledge, training data, or any information not present in those documents.\n"
+    "   - Do NOT infer, assume, or extrapolate beyond what the documents explicitly state.\n"
+    "2. If the RETRIEVED DOCUMENTS do not contain information relevant to the question, respond with exactly:\n"
+    "   'I do not know based on the knowledge base. Would you like me to connect to IT Support?'\n"
     "3. Format answers as numbered step-by-step troubleshooting instructions.\n"
     "4. Be concise and professional. No apologies or filler phrases.\n"
-    "5. If the answer is partial or uncertain, clearly state that in your response."
+    "5. If the documents provide only a partial answer, state clearly what is and is not covered."
 )
 
 MAF_ACTION_INSTRUCTIONS = (
@@ -207,19 +216,35 @@ MAF_ACTION_INSTRUCTIONS = (
     "   - If you only have the user's first and last name, pass them as 'first_name' and 'last_name' instead.\n"
     "   - Never pass both username and name fields at the same time.\n"
     "2. Use check_device_status only for device state checks.\n"
-    "3. Use create_ticket when directed.\n"
-    "4. Before creating a ticket, make sure you have:\n"
-    " - first name\n"
-    " - last name\n"
+    "3. Use create_ticket only when explicitly directed by the user.\n"
+    "4. Before creating a ticket, collect the following fields:\n"
+    " - username OR first name + last name (to identify the user)\n"
     " - issue description\n"
-    "5. If first name or last name is missing, ask for them separately:\n"
+    "5. ALWAYS scan the full conversation history first for these fields before asking the user:\n"
+    "   - Look for a username in any prior message (e.g. 'john.doe', an email like 'john@corp.com').\n"
+    "   - Look for a first name and last name mentioned anywhere in the conversation.\n"
+    "   - Look for an issue description in the user's original request.\n"
+    "   - If any field is found in history, use it directly — do NOT ask for it again.\n"
+    "6. Only ask for a field if it is genuinely absent from the entire conversation history:\n"
     " - First ask for the first name\n"
     " - Then ask for the last name\n"
-    "6. After collecting the name, call lookup_user to retrieve user identity and associated device_id.\n"
-    "7. Include the user's full name and device_id in the ticket payload whenever available.\n"
-    "8. Do NOT ask for more information if all required ticket fields are already available.\n"
-    "9. After ticket creation, reply with ticket_id, severity, status, and assignment_group.\n"
-    "10. Keep the final answer concise and professional."
+    "7. After confirming identity, call lookup_user to retrieve the device_id if not already known.\n"
+    "8. Include the user's full name and device_id in the ticket payload whenever available.\n"
+    "9. Do NOT ask for more information if all required ticket fields are already available.\n"
+    "10. After ticket creation, reply with ticket_id, severity, status, and assignment_group.\n"
+    "11. Keep the final answer concise and professional.\n"
+    "12. When lookup_user returns multiple matches (more than one user found):\n"
+    "    - Display all matches with their details.\n"
+    "    - Ask the user: 'Please enter the match number of the user you'd like to proceed with "
+    "(for example, reply with \\'1\\' for Match 1).'\n"
+    "    - Do NOT automatically select a user, check a device, or create a ticket.\n"
+    "    - Wait for the user to reply with a match number before taking any further action.\n"
+    "13. After the user selects a match number:\n"
+    "    - Display only the details for that specific match.\n"
+    "    - Ask: 'What would you like to do next? Reply with \\'device\\' to check device details "
+    "or \\'ticket\\' to create a support ticket.'\n"
+    "    - Do NOT automatically proceed to check device status or create a ticket.\n"
+    "    - Wait for the user's explicit choice before calling any further tools."
 )
 
 _MISSING_STARTUP_VARS = [
@@ -1027,6 +1052,21 @@ def build_ticket_prompt(ctx):
 
 async def handle_user_message(user_input, conversation_history):
     print("\n[Agent Controller] Evaluating message...")
+
+    # Pre-check: repeated input — user sent the same message as their previous turn
+    if conversation_history:
+        last_user_msg = next(
+            (m.get("content", "") for m in reversed(conversation_history) if m.get("role") == "user"),
+            None,
+        )
+        if last_user_msg and last_user_msg.strip().lower() == user_input.strip().lower():
+            last_assistant_msg = next(
+                (m.get("content", "") for m in reversed(conversation_history) if m.get("role") == "assistant"),
+                None,
+            )
+            if last_assistant_msg:
+                print("[Agent Controller] Repeated input detected — re-sending last assistant response.")
+                return last_assistant_msg, True
 
     # Pre-check: ticket confirmation following a prior escalation offer
     is_confirmation = (
