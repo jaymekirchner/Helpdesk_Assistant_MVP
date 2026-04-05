@@ -113,13 +113,17 @@ TOOL_REQUEST_SIGNALS = [
 TICKET_LOOKUP_SIGNALS = [
     "lookup ticket",
     "look up ticket",
+    "lookup tickets",
+    "look up tickets",
     "ticket status",
     "ticket details",
     "check ticket",
     "ticket info",
     "ticket information",
     "find ticket",
+    "find tickets",
     "search ticket",
+    "search tickets",
 ]
 
 TICKET_REQUEST_SIGNALS = [
@@ -187,12 +191,15 @@ TICKET_LOOKUP_NUMBER_PROMPT = (
     "Please provide the ticket number you'd like to look up (for example, 12345)."
 )
 TICKET_LOOKUP_METHOD_PROMPT = (
-    "Would you like to look up a ticket by ticket number, or get all tickets for a specific user? "
-    "Reply with 'number' or 'user'."
+    "Would you like to look up a ticket by ticket number, by username, or by user first and last name? "
+    "Reply with 'number', 'username', or 'name'."
 )
 TICKET_LOOKUP_USER_PROMPT = (
-    "Please provide the username (for example, john.doe) or full name (for example, John Doe) "
+    "Please provide the first and last name (for example, John Doe) "
     "of the user to retrieve tickets for."
+)
+TICKET_LOOKUP_USERNAME_PROMPT = (
+    "Please provide the username (for example, john.doe) to retrieve tickets for."
 )
 
 MAF_TRIAGE_INSTRUCTIONS = (
@@ -959,6 +966,20 @@ def extract_ticket_id_from_input(user_input: str) -> str:
     return match.group(1) if match else ""
 
 
+def extract_lookup_by_keyword(user_input: str) -> str:
+    """If the message contains a 'by <keyword>' direction, return 'username', 'name', or 'number'."""
+    msg = user_input.lower()
+    if "by" not in msg:
+        return ""
+    if re.search(r"\bby\s+username\b", msg):
+        return "username"
+    if re.search(r"\bby\s+(user|name|first\s+name|last\s+name)\b", msg):
+        return "name"
+    if re.search(r"\bby\s+(number|ticket\s*number|ticket|id|ticket\s*id)\b", msg):
+        return "number"
+    return ""
+
+
 def last_assistant_asked_for_ticket_number(conversation_history) -> bool:
     """Return True when the most recent assistant message asked for a ticket number."""
     for message in reversed(conversation_history):
@@ -980,12 +1001,15 @@ def last_assistant_asked_for_ticket_lookup_method(conversation_history) -> bool:
 
 
 def last_assistant_asked_for_ticket_lookup_user(conversation_history) -> bool:
-    """Return True when the most recent assistant message asked for a username/name for ticket-by-user lookup."""
+    """Return True when the most recent assistant message asked for a name or username for ticket-by-user lookup."""
     for message in reversed(conversation_history):
         if message.get("role") != "assistant":
             continue
         content = (message.get("content") or "").lower()
-        return TICKET_LOOKUP_USER_PROMPT.lower() in content
+        return (
+            TICKET_LOOKUP_USER_PROMPT.lower() in content
+            or TICKET_LOOKUP_USERNAME_PROMPT.lower() in content
+        )
     return False
 
 
@@ -1044,6 +1068,27 @@ def user_reports_failed_steps(user_input, conversation_history):
         had_escalation = ESCALATION_SUFFIX in content
         return had_steps and not had_escalation
 
+    return False
+
+
+def ticket_already_created_in_session(conversation_history) -> str:
+    """Return the most recent ticket ID if a ticket was created in this conversation, else ''."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content") or ""
+        if "ticket created successfully" in content.lower():
+            match = re.search(r"ID:\s*(\S+)", content, re.IGNORECASE)
+            return match.group(1).rstrip(".,;)") if match else "unknown"
+    return ""
+
+
+def last_assistant_warned_about_duplicate_ticket(conversation_history) -> bool:
+    """Return True when the last assistant message was a duplicate ticket warning."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        return "ticket was already opened in this conversation" in (message.get("content") or "").lower()
     return False
 
 
@@ -1505,7 +1550,9 @@ async def handle_user_message(user_input, conversation_history):
         choice = user_input.strip().lower()
         if "number" in choice or choice == "1":
             return TICKET_LOOKUP_NUMBER_PROMPT, True
-        elif "user" in choice or choice == "2":
+        elif choice == "username" or "username" in choice:
+            return TICKET_LOOKUP_USERNAME_PROMPT, True
+        elif "name" in choice or "user" in choice or choice == "2":
             return TICKET_LOOKUP_USER_PROMPT, True
         else:
             return TICKET_LOOKUP_METHOD_PROMPT, True  # re-ask if unclear
@@ -1520,6 +1567,16 @@ async def handle_user_message(user_input, conversation_history):
             ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
+        by_method = extract_lookup_by_keyword(user_input)
+        if by_method == "username":
+            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for username")
+            return TICKET_LOOKUP_USERNAME_PROMPT, True
+        if by_method == "name":
+            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for first/last name")
+            return TICKET_LOOKUP_USER_PROMPT, True
+        if by_method == "number":
+            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for ticket number")
+            return TICKET_LOOKUP_NUMBER_PROMPT, True
         return TICKET_LOOKUP_METHOD_PROMPT, True
 
     # Step 1: Direct lookup request — start method selection
@@ -1535,6 +1592,26 @@ async def handle_user_message(user_input, conversation_history):
             + ESCALATION_SUFFIX
             + "\n\nWould you like me to create a support ticket for this issue?"
         ), True
+
+    # Duplicate ticket guard — prevent auto-creating a second ticket for the same session
+    if last_assistant_warned_about_duplicate_ticket(conversation_history):
+        if looks_like_ticket_confirmation(user_input):
+            print("[Agent Controller] Decision → DUPLICATE TICKET CONFIRMED → prompting for new issue")
+            return (
+                "Please describe the new issue you'd like to open a ticket for."
+            ), True
+        if user_input.strip().lower() in ("no", "no thanks", "cancel", "never mind", "nevermind", "nope"):
+            return "Understood. No additional ticket will be created.", True
+
+    if looks_like_ticket_request(user_input):
+        existing_ticket_id = ticket_already_created_in_session(conversation_history)
+        if existing_ticket_id:
+            print(f"[Agent Controller] Decision → DUPLICATE TICKET GUARD (existing: {existing_ticket_id})")
+            return (
+                f"A ticket was already opened in this conversation (Ticket ID: {existing_ticket_id}). "
+                "Would you like to open an additional ticket for a different issue? "
+                "Reply 'yes' to proceed or 'no' to cancel."
+            ), True
 
     # Delegate all routing decisions to the MAF Orchestrator
     response = await run_orchestrator(user_input, conversation_history)
