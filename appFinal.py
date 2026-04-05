@@ -299,6 +299,19 @@ def _extract_mcp_records(result):
 # ============================================================
 # MAF TOOLS
 # ============================================================
+def _format_single_user(record: dict, fallback_username: str = "") -> str:
+    full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
+    if not full_name:
+        full_name = record.get("name", "Unknown")
+    return (
+        f"- Username: {record.get('username', fallback_username)}\n"
+        f"- Name: {full_name}\n"
+        f"- Department: {record.get('department', 'Unknown')}\n"
+        f"- Email: {record.get('email', 'Unknown')}\n"
+        f"- Device ID: {record.get('device_id', 'Unknown')}"
+    )
+
+
 @tool(
     name="lookup_user",
     description="Look up a corporate user by username OR by first and last name. Use when the user asks to find user information."
@@ -324,18 +337,18 @@ def lookup_user(
             return str(envelope)
         if not envelope.get("success"):
             return envelope.get("error") or "User lookup failed."
-        record = envelope.get("data") or {}
-        full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
-        if not full_name:
-            full_name = record.get("name", "Unknown")
-        return (
-            "User found:\n"
-            f"- Username: {record.get('username', username)}\n"
-            f"- Name: {full_name}\n"
-            f"- Department: {record.get('department', 'Unknown')}\n"
-            f"- Email: {record.get('email', 'Unknown')}\n"
-            f"- Device ID: {record.get('device_id', 'Unknown')}"
-        )
+        data = envelope.get("data")
+        # Name-based search returns a list — show all matches
+        if isinstance(data, list):
+            count = envelope.get("count", len(data))
+            if count == 1:
+                return "User found:\n" + _format_single_user(data[0])
+            lines = [f"{count} users found with that name:"]
+            for i, record in enumerate(data, 1):
+                lines.append(f"\nMatch {i}:\n" + _format_single_user(record))
+            return "\n".join(lines)
+        # Username-based search returns a single dict
+        return "User found:\n" + _format_single_user(data or {}, username)
     except Exception as e:
         return f"Error looking up user via MCP: {str(e)}"
 
