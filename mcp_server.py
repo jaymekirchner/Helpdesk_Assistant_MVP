@@ -313,7 +313,21 @@ def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -
                         "FROM demo.users WHERE LOWER(username) = %s",
                         (username.lower(),),
                     )
-                    not_found_msg = f"No user found for username '{username}'."
+                    row = cursor.fetchone()
+                    if not row:
+                        return {"success": False, "error": f"No user found for username '{username}'.", "data": None}
+                    return {
+                        "success": True,
+                        "error": None,
+                        "data": {
+                            "username": row[0],
+                            "first_name": row[1],
+                            "last_name": row[2],
+                            "department": row[3],
+                            "email": row[4],
+                            "device_id": row[5],
+                        },
+                    }
                 else:
                     cursor.execute(
                         "SELECT username, first_name, last_name, department, email, device_id "
@@ -321,22 +335,26 @@ def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -
                         "WHERE LOWER(first_name) = %s AND LOWER(last_name) = %s",
                         (first_name.lower(), last_name.lower()),
                     )
-                    not_found_msg = f"No user found for name '{first_name} {last_name}'."
-                row = cursor.fetchone()
-                if not row:
-                    return {"success": False, "error": not_found_msg, "data": None}
-                return {
-                    "success": True,
-                    "error": None,
-                    "data": {
-                        "username": row[0],
-                        "first_name": row[1],
-                        "last_name": row[2],
-                        "department": row[3],
-                        "email": row[4],
-                        "device_id": row[5],
-                    },
-                }
+                    rows = cursor.fetchall()
+                    if not rows:
+                        return {"success": False, "error": f"No user found for name '{first_name} {last_name}'.", "data": None}
+                    matches = [
+                        {
+                            "username": r[0],
+                            "first_name": r[1],
+                            "last_name": r[2],
+                            "department": r[3],
+                            "email": r[4],
+                            "device_id": r[5],
+                        }
+                        for r in rows
+                    ]
+                    return {
+                        "success": True,
+                        "error": None,
+                        "count": len(matches),
+                        "data": matches,
+                    }
     except psycopg2.Error as e:
         return {"success": False, "error": f"Database error: {e}", "data": None}
 

@@ -151,6 +151,10 @@ LOOKUP_METHOD_PROMPT = (
 LOOKUP_USERNAME_INPUT_PROMPT = "Please provide the username (for example, john.doe)."
 LOOKUP_FIRST_NAME_PROMPT = "Please provide the first name."
 LOOKUP_LAST_NAME_PROMPT = "Please provide the last name."
+LOOKUP_DISAMBIGUATE_PROMPT = (
+    "Multiple users share that name. Please provide the device ID of the user you'd like to proceed with "
+    "(device IDs are listed above next to each match)."
+)
 
 MAF_TRIAGE_INSTRUCTIONS = (
     "You are an IT Helpdesk triage agent.\n\n"
@@ -299,6 +303,19 @@ def _extract_mcp_records(result):
 # ============================================================
 # MAF TOOLS
 # ============================================================
+def _format_single_user(record: dict, fallback_username: str = "") -> str:
+    full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
+    if not full_name:
+        full_name = record.get("name", "Unknown")
+    return (
+        f"- Username: {record.get('username', fallback_username)}\n"
+        f"- Name: {full_name}\n"
+        f"- Department: {record.get('department', 'Unknown')}\n"
+        f"- Email: {record.get('email', 'Unknown')}\n"
+        f"- Device ID: {record.get('device_id', 'Unknown')}"
+    )
+
+
 @tool(
     name="lookup_user",
     description="Look up a corporate user by username OR by first and last name. Use when the user asks to find user information."
@@ -324,18 +341,19 @@ def lookup_user(
             return str(envelope)
         if not envelope.get("success"):
             return envelope.get("error") or "User lookup failed."
-        record = envelope.get("data") or {}
-        full_name = " ".join(filter(None, [record.get("first_name"), record.get("last_name")])).strip()
-        if not full_name:
-            full_name = record.get("name", "Unknown")
-        return (
-            "User found:\n"
-            f"- Username: {record.get('username', username)}\n"
-            f"- Name: {full_name}\n"
-            f"- Department: {record.get('department', 'Unknown')}\n"
-            f"- Email: {record.get('email', 'Unknown')}\n"
-            f"- Device ID: {record.get('device_id', 'Unknown')}"
-        )
+        data = envelope.get("data")
+        # Name-based search returns a list — show all matches
+        if isinstance(data, list):
+            count = envelope.get("count", len(data))
+            if count == 1:
+                return "User found:\n" + _format_single_user(data[0])
+            lines = [f"{count} users found with that name:"]
+            for i, record in enumerate(data, 1):
+                lines.append(f"\nMatch {i}:\n" + _format_single_user(record))
+            lines.append(f"\n{LOOKUP_DISAMBIGUATE_PROMPT}")
+            return "\n".join(lines)
+        # Username-based search returns a single dict
+        return "User found:\n" + _format_single_user(data or {}, username)
     except Exception as e:
         return f"Error looking up user via MCP: {str(e)}"
 
@@ -727,6 +745,16 @@ def get_first_name_from_lookup_history(conversation_history) -> str:
     return ""
 
 
+def last_assistant_asked_for_disambiguating_device_id(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for a device ID to disambiguate multiple name matches."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return LOOKUP_DISAMBIGUATE_PROMPT.lower() in content
+    return False
+
+
 def should_run_escalation_check(response_text):
     """
     Run escalation logic only for explicit unknown-answer outcomes.
@@ -1032,6 +1060,35 @@ async def handle_user_message(user_input, conversation_history):
             return action_response.text, True
 
     # ── Lookup method selection flow (explicit user-lookup requests) ─────────────
+
+    # Step 4c: Device ID provided to disambiguate multiple name matches
+    if conversation_history and last_assistant_asked_for_disambiguating_device_id(conversation_history):
+        device_id = user_input.strip()
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        print(f"[Agent Controller] Decision → DISAMBIGUATE by device_id: {device_id}")
+        history_context = "\n".join(
+            f"{m['role'].upper()}: {m['content']}"
+            for m in conversation_history[-HISTORY_LIMIT:]
+        )
+        # Determine if a ticket was being created when disambiguation triggered
+        history_text = " ".join(m.get("content", "") for m in conversation_history).lower()
+        is_ticket_flow = any(s in history_text for s in TICKET_REQUEST_SIGNALS)
+        if is_ticket_flow:
+            disambig_prompt = (
+                f"Conversation history:\n{history_context}\n\n"
+                f"The user selected device ID '{device_id}' to identify the specific user for ticket creation. "
+                f"Use check_device_status with '{device_id}' to resolve the username, "
+                "then create the IT support ticket using that username and the issue details from the conversation history."
+            )
+        else:
+            disambig_prompt = (
+                f"Conversation history:\n{history_context}\n\n"
+                f"The user selected device ID '{device_id}' to identify the specific user. "
+                f"Use check_device_status with '{device_id}' and display the full user and device details."
+            )
+        action_response = await action_agent.run(disambig_prompt)
+        return action_response.text, True
 
     # Step 4b: Last name received — perform name-based lookup
     if conversation_history and last_assistant_asked_for_lookup_last_name(conversation_history):
