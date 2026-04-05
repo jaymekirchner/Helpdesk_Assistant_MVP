@@ -1255,13 +1255,11 @@ async def handle_user_message(user_input, conversation_history):
             None,
         )
         if last_user_msg and last_user_msg.strip().lower() == user_input.strip().lower():
-            last_assistant_msg = next(
-                (m.get("content", "") for m in reversed(conversation_history) if m.get("role") == "assistant"),
-                None,
-            )
-            if last_assistant_msg:
-                print("[Agent Controller] Repeated input detected — re-sending last assistant response.")
-                return last_assistant_msg, True
+            print("[Agent Controller] Repeated input detected — sending clarification prompt.")
+            return (
+                "It looks like you sent the same message again. "
+                "Are you still waiting for something, or would you like to rephrase your request?"
+            ), True
 
     # Pre-check: KB ticket flow — email value received
     if conversation_history and last_assistant_asked_for_kb_ticket_email(conversation_history):
