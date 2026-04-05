@@ -18,11 +18,11 @@ except Exception as import_error:
     async def handle_user_message(user_input, conversation_history):
         return (
             "The assistant backend failed to initialize due to a missing or broken Python package. "
-            f"Startup error: {import_error}"
+            f"Startup error: {APP_IMPORT_ERROR}"
         ), False
 
     def _call_mcp_tool(tool_name, args):
-        raise RuntimeError(f"Backend initialization failed: {import_error}")
+        raise RuntimeError(f"Backend initialization failed: {APP_IMPORT_ERROR}")
 
     def _extract_mcp_records(result):
         return []
@@ -345,6 +345,9 @@ def main():
                 st.success("✅ Server ready")
             else:
                 st.warning("⚠️ Server degraded")
+                error_details = health.get("error")
+                if error_details:
+                    st.error(f"Startup details: {error_details}")
             for dep, status in checks.items():
                 icon = "🟢" if status in ("ok", "configured") else "🔴"
                 st.markdown(f"{icon} **{dep}**: {status}")
