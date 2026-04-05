@@ -144,6 +144,14 @@ IDENTITY_LOOKUP_PROMPT = (
     "Thanks. Please provide either your username or your email so I can look up your account details."
 )
 
+LOOKUP_METHOD_PROMPT = (
+    "Would you like to look up the user by username or by first and last name? "
+    "Please reply with 'username' or 'name'."
+)
+LOOKUP_USERNAME_INPUT_PROMPT = "Please provide the username (for example, john.doe)."
+LOOKUP_FIRST_NAME_PROMPT = "Please provide the first name."
+LOOKUP_LAST_NAME_PROMPT = "Please provide the last name."
+
 MAF_TRIAGE_INSTRUCTIONS = (
     "You are an IT Helpdesk triage agent.\n\n"
     "Your job is to read the user's request and conversation history, classify the issue, "
@@ -186,7 +194,10 @@ MAF_KNOWLEDGE_INSTRUCTIONS = (
 MAF_ACTION_INSTRUCTIONS = (
     "You are an IT Helpdesk action agent.\n\n"
     "Rules:\n"
-    "1. Use lookup_user strictly for user identity lookup (this includes retrieving user profile and associated device_id).\n"
+    "1. Use lookup_user to retrieve a user profile and their associated device_id.\n"
+    "   - If you have the username, pass it as 'username'.\n"
+    "   - If you only have the user's first and last name, pass them as 'first_name' and 'last_name' instead.\n"
+    "   - Never pass both username and name fields at the same time.\n"
     "2. Use check_device_status only for device state checks.\n"
     "3. Use create_ticket when directed.\n"
     "4. Before creating a ticket, make sure you have:\n"
@@ -290,13 +301,23 @@ def _extract_mcp_records(result):
 # ============================================================
 @tool(
     name="lookup_user",
-    description="Look up a corporate user by username. Use when the user asks to find user information."
+    description="Look up a corporate user by username OR by first and last name. Use when the user asks to find user information."
 )
 def lookup_user(
-    username: Annotated[str, Field(description="Employee username, for example john.doe")]
+    username: Annotated[str, Field(description="Employee username, for example john.doe. Leave empty if searching by name.")] = "",
+    first_name: Annotated[str, Field(description="Employee first name. Use together with last_name when username is unknown.")] = "",
+    last_name: Annotated[str, Field(description="Employee last name. Use together with first_name when username is unknown.")] = "",
 ) -> str:
+    args: dict = {}
+    if username:
+        args["username"] = username
+    elif first_name and last_name:
+        args["first_name"] = first_name
+        args["last_name"] = last_name
+    else:
+        return "Please provide either a username or both a first name and last name to look up a user."
     try:
-        result = _call_mcp_tool("lookup_user", {"username": username})
+        result = _call_mcp_tool("lookup_user", args)
         records = _extract_mcp_records(result)
         envelope = records[0] if records else {}
         if not isinstance(envelope, dict):
@@ -647,6 +668,65 @@ def normalize_lookup_username(identity_value: str, identity_kind: str) -> str:
     return identity_value.strip().lower()
 
 
+def looks_like_direct_lookup_request(user_input: str) -> bool:
+    """Return True for explicit standalone user-lookup requests."""
+    msg = user_input.lower()
+    return any(s in msg for s in ["lookup user", "look up user", "find a user", "user lookup"])
+
+
+def last_assistant_asked_lookup_method(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked username-or-name."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return "reply with 'username' or 'name'" in content
+    return False
+
+
+def last_assistant_asked_for_lookup_username(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for the username (lookup flow)."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return LOOKUP_USERNAME_INPUT_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_lookup_first_name(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for the first name (lookup flow)."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return LOOKUP_FIRST_NAME_PROMPT.lower() in content
+    return False
+
+
+def last_assistant_asked_for_lookup_last_name(conversation_history) -> bool:
+    """Return True when the most recent assistant message asked for the last name (lookup flow)."""
+    for message in reversed(conversation_history):
+        if message.get("role") != "assistant":
+            continue
+        content = (message.get("content") or "").lower()
+        return LOOKUP_LAST_NAME_PROMPT.lower() in content
+    return False
+
+
+def get_first_name_from_lookup_history(conversation_history) -> str:
+    """Return the user reply that followed the first-name prompt in the lookup flow."""
+    for i, msg in enumerate(conversation_history):
+        if (
+            msg.get("role") == "assistant"
+            and LOOKUP_FIRST_NAME_PROMPT.lower() in (msg.get("content") or "").lower()
+            and i + 1 < len(conversation_history)
+            and conversation_history[i + 1].get("role") == "user"
+        ):
+            return conversation_history[i + 1].get("content", "").strip()
+    return ""
+
+
 def should_run_escalation_check(response_text):
     """
     Run escalation logic only for explicit unknown-answer outcomes.
@@ -950,6 +1030,57 @@ async def handle_user_message(user_input, conversation_history):
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
+
+    # ── Lookup method selection flow (explicit user-lookup requests) ─────────────
+
+    # Step 4b: Last name received — perform name-based lookup
+    if conversation_history and last_assistant_asked_for_lookup_last_name(conversation_history):
+        last_name = user_input.strip()
+        first_name = get_first_name_from_lookup_history(conversation_history)
+        if not first_name:
+            return "I couldn't retrieve the first name. Please start the lookup again.", True
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        print(f"[Agent Controller] Decision → LOOKUP by name: {first_name} {last_name}")
+        lookup_prompt = (
+            f"Use lookup_user with first_name='{first_name}' and last_name='{last_name}'. "
+            "Display all the user details returned."
+        )
+        action_response = await action_agent.run(lookup_prompt)
+        return action_response.text, True
+
+    # Step 3b: First name received — ask for last name
+    if conversation_history and last_assistant_asked_for_lookup_first_name(conversation_history):
+        print("[Agent Controller] First name received — asking for last name")
+        return LOOKUP_LAST_NAME_PROMPT, True
+
+    # Step 3a: Username received — perform username-based lookup
+    if conversation_history and last_assistant_asked_for_lookup_username(conversation_history):
+        username = user_input.strip()
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        print(f"[Agent Controller] Decision → LOOKUP by username: {username}")
+        lookup_prompt = (
+            f"Use lookup_user with username='{username}'. "
+            "Display all the user details returned."
+        )
+        action_response = await action_agent.run(lookup_prompt)
+        return action_response.text, True
+
+    # Step 2: Lookup method chosen — ask for the appropriate identifier
+    if conversation_history and last_assistant_asked_lookup_method(conversation_history):
+        choice = user_input.strip().lower()
+        if "username" in choice or choice == "1":
+            return LOOKUP_USERNAME_INPUT_PROMPT, True
+        elif "name" in choice or choice == "2":
+            return LOOKUP_FIRST_NAME_PROMPT, True
+        else:
+            return LOOKUP_METHOD_PROMPT, True  # re-ask if response was unclear
+
+    # Step 1: Direct lookup request — start method selection
+    if looks_like_direct_lookup_request(user_input):
+        print("[Agent Controller] Decision → DIRECT LOOKUP → prompting for method")
+        return LOOKUP_METHOD_PROMPT, True
 
     # If user says previously provided steps failed, proactively offer escalation.
     if user_reports_failed_steps(user_input, conversation_history):

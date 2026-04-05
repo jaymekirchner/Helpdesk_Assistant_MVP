@@ -126,6 +126,83 @@ def _resolve_requester_email(user: str) -> str:
     return default_email
 
 
+def _map_freshworks_status(status_code) -> str:
+    """Map Freshworks integer status code to a human-readable string."""
+    mapping = {2: "Open", 3: "Pending", 4: "Resolved", 5: "Closed"}
+    try:
+        return mapping.get(int(status_code), str(status_code))
+    except (TypeError, ValueError):
+        return str(status_code) if status_code else "Open"
+
+
+def _save_ticket_to_postgres(
+    ticket_id: str,
+    severity: str,
+    status: str,
+    assignment_group: str,
+    username: str,
+    first_name: str = "",
+    last_name: str = "",
+) -> None:
+    """Persist ticket details to demo.tickets. Resolves user_id and device_id from demo.users.
+    Tries username first; falls back to first_name + last_name if username is missing or not found.
+    Non-fatal: logs errors but never raises so ticket creation always succeeds."""
+    conn_str = _postgres_conn_string()
+    if not conn_str:
+        print("[Postgres] Connection string not configured — skipping ticket save.")
+        return
+    try:
+        with psycopg2.connect(conn_str) as conn:
+            with conn.cursor() as cur:
+                # Resolve user_id and device_id — try username first, then first+last name
+                user_id = None
+                device_id = None
+                if username and username != "unknown":
+                    cur.execute(
+                        "SELECT user_id, device_id FROM demo.users WHERE LOWER(username) = %s",
+                        (username.lower(),),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        user_id, device_id = row[0], row[1]
+                if user_id is None and first_name and last_name:
+                    cur.execute(
+                        "SELECT user_id, device_id FROM demo.users "
+                        "WHERE LOWER(first_name) = %s AND LOWER(last_name) = %s",
+                        (first_name.lower(), last_name.lower()),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        user_id, device_id = row[0], row[1]
+
+                cur.execute(
+                    """
+                    INSERT INTO demo.tickets
+                        (ticket_id, severity, status, assignment_group, user_id, device_id, update_timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticket_id) DO UPDATE SET
+                        severity         = EXCLUDED.severity,
+                        status           = EXCLUDED.status,
+                        assignment_group = EXCLUDED.assignment_group,
+                        user_id          = EXCLUDED.user_id,
+                        device_id        = EXCLUDED.device_id,
+                        update_timestamp = EXCLUDED.update_timestamp
+                    """,
+                    (
+                        str(ticket_id)[:20],
+                        severity[:50] if severity else None,
+                        status[:50] if status else None,
+                        str(assignment_group)[:100] if assignment_group else None,
+                        user_id,
+                        device_id,
+                        datetime.datetime.utcnow(),
+                    ),
+                )
+        print(f"[Postgres] Ticket {ticket_id} saved to demo.tickets.")
+    except psycopg2.Error as e:
+        print(f"[Postgres] Failed to save ticket {ticket_id} to demo.tickets: {e}")
+
+
 @mcp.tool
 def create_ticket(
     issue: str,
@@ -133,8 +210,12 @@ def create_ticket(
     category: str = "General",
     severity: str = "Medium",
     impacted_system: str = "Unknown",
+    first_name: str = "",
+    last_name: str = "",
 ) -> dict:
-    """Create an IT support ticket in Freshworks."""
+    """Create an IT support ticket in Freshworks.
+    Provide 'user' (username) or 'first_name'+'last_name' to link the ticket to the correct user record.
+    """
     freshworks_api_key = os.getenv("FRESHWORKS_API_KEY", "")
     endpoint = _freshworks_endpoint()
 
@@ -171,6 +252,20 @@ def create_ticket(
             }
 
         ticket_data = response.json().get("ticket", {})
+        freshworks_status = _map_freshworks_status(ticket_data.get("status"))
+        freshworks_group  = ticket_data.get("group_id")
+
+        # Persist to Postgres (non-fatal)
+        _save_ticket_to_postgres(
+            ticket_id=ticket_data.get("id"),
+            severity=severity,
+            status=freshworks_status,
+            assignment_group=str(freshworks_group) if freshworks_group else None,
+            username=user,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
         return {
             "success": True,
             "error": None,
@@ -182,9 +277,9 @@ def create_ticket(
                 "category": category,
                 "severity": severity,
                 "impacted_system": impacted_system,
-                "status": ticket_data.get("status"),
+                "status": freshworks_status,
                 "priority": _map_severity_to_priority(severity),
-                "assignment_group": ticket_data.get("group_id"),
+                "assignment_group": freshworks_group,
                 "created_at_utc": ticket_data.get("created_at"),
                 "url": f"https://{os.getenv('FRESHWORKS_DOMAIN')}.freshservice.com/support/tickets/{ticket_data.get('id')}",
             },
@@ -198,21 +293,38 @@ def create_ticket(
 
 
 @mcp.tool
-def lookup_user(username: str) -> dict:
-    """Look up a corporate user by username (Postgres only)."""
+def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -> dict:
+    """Look up a corporate user by username OR by first and last name (Postgres only)."""
+    if not username and not (first_name and last_name):
+        return {
+            "success": False,
+            "error": "Provide either 'username' or both 'first_name' and 'last_name'.",
+            "data": None,
+        }
     conn = _postgres_conn_string()
     if not conn:
         return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT username, first_name, last_name, department, email, device_id FROM demo.users WHERE LOWER(username) = %s",
-                    (username.lower(),),
-                )
+                if username:
+                    cursor.execute(
+                        "SELECT username, first_name, last_name, department, email, device_id "
+                        "FROM demo.users WHERE LOWER(username) = %s",
+                        (username.lower(),),
+                    )
+                    not_found_msg = f"No user found for username '{username}'."
+                else:
+                    cursor.execute(
+                        "SELECT username, first_name, last_name, department, email, device_id "
+                        "FROM demo.users "
+                        "WHERE LOWER(first_name) = %s AND LOWER(last_name) = %s",
+                        (first_name.lower(), last_name.lower()),
+                    )
+                    not_found_msg = f"No user found for name '{first_name} {last_name}'."
                 row = cursor.fetchone()
                 if not row:
-                    return {"success": False, "error": f"No user found for username '{username}'.", "data": None}
+                    return {"success": False, "error": not_found_msg, "data": None}
                 return {
                     "success": True,
                     "error": None,
