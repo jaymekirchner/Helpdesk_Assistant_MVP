@@ -349,7 +349,11 @@ async def handle_user_message(user_input: str, conversation_history: list):
         username = detector.get_username_from_lookup_result(conversation_history)
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        if "device" in choice:
+        # If user says 'lookup ticket' or similar, trigger lookup_ticket flow
+        if detector.looks_like_ticket_lookup_request(choice):
+            # Ask for ticket number
+            return TICKET_LOOKUP_NUMBER_PROMPT, True
+        elif "device" in choice:
             print(f"[Agent Controller] Decision → CHECK DEVICE for username: {username}")
             device_prompt = f"Use check_device_status with '{username}'. Display the full device details."
             action_response = await action_agent.run(device_prompt)
