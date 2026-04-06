@@ -310,15 +310,9 @@ def main():
 
     # Sidebar
     with st.sidebar:
-        st.markdown('<div class="sidebar-info">', unsafe_allow_html=True)
-        st.markdown("### 🛠️ IT Helpdesk Assistant Health Check")
-        # st.markdown("**Features:**")
-        # st.markdown("- Knowledge base search")
-        # st.markdown("- User lookup")
-        # st.markdown("- Device status check")
-        # st.markdown("- Ticket creation")
-        # st.markdown("- Smart escalation")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("""<div class="sidebar-info">
+            <h3 style="margin:0;">🛠️ IT Helpdesk Assistant<br>Health Check</h3>
+        </div>""", unsafe_allow_html=True)
 
         # ── MCP Server Status ──────────────────────────────
         health = st.session_state.get("health_status")
@@ -357,7 +351,7 @@ def main():
     with col_title:
         st.markdown('<h1 class="main-header">IT Helpdesk Assistant</h1>', unsafe_allow_html=True)
     with col_clear:
-        if st.button("🗑️ Clear", key="main_clear"):
+        if st.button("🗑️ Clear Conversation", key="main_clear"):
             st.session_state.conversation_history = []
             st.session_state.messages = []
             st.session_state.last_input = ""
