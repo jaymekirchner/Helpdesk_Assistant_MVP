@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>IT Helpdesk Assistant — Executive Brief</title>
+<style>
+  /* ── Screen styles ─────────────────────────────── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    color: #1a1a2e;
+    background: #f4f7fb;
+    display: flex;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .page {
+    background: #ffffff;
+    width: 8.5in;
+    min-height: 11in;
+    padding: 0.7in 0.8in;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  }
+
+  /* ── Header ────────────────────────────────────── */
+  .header {
+    border-bottom: 3px solid #0b3d91;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.6rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .header h1 {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #0b3d91;
+    letter-spacing: 0.3px;
+  }
+  .header .meta {
+    font-size: 8.5pt;
+    color: #5a6a7a;
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* ── Tagline ───────────────────────────────────── */
+  .tagline {
+    font-size: 10.5pt;
+    color: #2d5fa6;
+    font-style: italic;
+    margin-bottom: 0.85rem;
+  }
+
+  /* ── Section layout ────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
+  }
+  .card {
+    border: 1px solid #d0ddef;
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    background: #fafcff;
+  }
+  .card.full { grid-column: 1 / -1; }
+  .card.accent { background: #eef4ff; border-color: #aac2e8; }
+
+  h2 {
+    font-size: 9.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #0b3d91;
+    margin-bottom: 0.35rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  p, li { font-size: 10pt; line-height: 1.55; color: #2c3e50; }
+  ul { padding-left: 1.1rem; }
+  li { margin-bottom: 0.15rem; }
+
+  /* ── ROI table ─────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin-top: 0.25rem;
+  }
+  th {
+    background: #0b3d91;
+    color: #fff;
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+  }
+  td { padding: 0.22rem 0.5rem; border-bottom: 1px solid #dde6f0; }
+  tr:nth-child(even) td { background: #f0f5fc; }
+  .highlight td { font-weight: 700; color: #0b3d91; }
+
+  /* ── Footer ────────────────────────────────────── */
+  .footer {
+    margin-top: 0.7rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid #d0ddef;
+    font-size: 8pt;
+    color: #7a8fa6;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ── Print overrides ───────────────────────────── */
+  @media print {
+    body { background: none; padding: 0; }
+    .page {
+      box-shadow: none;
+      width: 100%;
+      min-height: auto;
+      padding: 0.55in 0.65in;
+    }
+    @page { size: Letter; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>IT Helpdesk Assistant — Executive Brief</h1>
+    <div class="meta">
+      Prepared: April 5, 2026<br>
+      Classification: Internal / VP Review
+    </div>
+  </div>
+  <p class="tagline">Reducing IT resolution time and ticket friction through conversational AI</p>
+
+  <!-- Grid -->
+  <div class="grid">
+
+    <!-- Problem -->
+    <div class="card accent">
+      <h2>⚠️ The Problem</h2>
+      <ul>
+        <li><strong>Slow resolution:</strong> Employees lose productivity searching scattered documentation before they even open a ticket.</li>
+        <li><strong>Hard-to-find guidance:</strong> How-to documents exist but are not discoverable at the point of need.</li>
+        <li><strong>Ticket friction:</strong> Manual ticket creation is multi-step, slow, and interrupts work.</li>
+      </ul>
+      <p style="margin-top:0.35rem;font-size:9pt;color:#4a5a6a;">
+        Every unresolved IT issue costs approximately <strong>45–90 minutes</strong> of lost productivity per employee per incident (industry benchmark).
+      </p>
+    </div>
+
+    <!-- Solution -->
+    <div class="card accent">
+      <h2>✅ The Solution</h2>
+      <p>An AI-powered IT Helpdesk Assistant that gives employees instant, conversational access to:</p>
+      <ul style="margin-top:0.3rem;">
+        <li><strong>Instant answers</strong> from the corporate knowledge base (AI Search)</li>
+        <li><strong>One-sentence ticket creation</strong> via natural language</li>
+        <li><strong>Self-service lookups</strong> — user records, device status, ticket history</li>
+        <li><strong>Smart escalation</strong> when the knowledge base cannot resolve the issue</li>
+      </ul>
+    </div>
+
+    <!-- Tech Stack -->
+    <div class="card">
+      <h2>🔧 Tech Stack</h2>
+      <ul>
+        <li><strong>Azure OpenAI (GPT-4o)</strong> — reasoning &amp; language generation</li>
+        <li><strong>Azure AI Search</strong> — retrieval-augmented generation over IT docs</li>
+        <li><strong>Microsoft Agent Framework</strong> — multi-agent orchestration (Triage → Knowledge → Action)</li>
+        <li><strong>FastMCP + Freshservice</strong> — secure tool execution &amp; ticketing API</li>
+        <li><strong>Azure PostgreSQL</strong> — user, device &amp; ticket data</li>
+        <li><strong>Streamlit</strong> — lightweight web UI, deployable to Azure App Service</li>
+      </ul>
+    </div>
+
+    <!-- Next Steps -->
+    <div class="card">
+      <h2>🚀 Proposed Next Steps</h2>
+      <ol style="padding-left:1.1rem;">
+        <li><strong>Pilot (30 days):</strong> Deploy to one department; collect resolution-time and CSAT data.</li>
+        <li><strong>Knowledge expansion:</strong> Ingest full IT policy library &amp; runbooks into AI Search.</li>
+        <li><strong>SSO / RBAC:</strong> Integrate Azure AD for identity-aware responses.</li>
+        <li><strong>Analytics dashboard:</strong> Track deflection rate, MTTR, and ticket volume trends.</li>
+        <li><strong>Full rollout:</strong> Extend to all employees; evaluate Teams/Slack bot integration.</li>
+      </ol>
+    </div>
+
+    <!-- ROI -->
+    <div class="card full">
+      <h2>📈 ROI Estimate (1,000-Employee Baseline)</h2>
+      <table>
+        <thead>
+          <tr><th>Metric</th><th>Baseline (Today)</th><th>With Assistant</th><th>Annual Saving</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>IT incidents per employee / year</td>
+            <td>12</td><td>12</td><td>—</td>
+          </tr>
+          <tr>
+            <td>Avg. resolution time (self-service)</td>
+            <td>60 min</td><td>8 min</td><td>—</td>
+          </tr>
+          <tr>
+            <td>Self-service deflection rate</td>
+            <td>0 %</td><td>~50 %</td><td>—</td>
+          </tr>
+          <tr>
+            <td>Productive hours recovered</td>
+            <td>—</td><td>—</td><td><strong>~4,600 hrs</strong></td>
+          </tr>
+          <tr>
+            <td>Value @ $75 blended hourly rate</td>
+            <td>—</td><td>—</td><td><strong>~$345,000</strong></td>
+          </tr>
+          <tr class="highlight">
+            <td>Estimated platform cost (Azure + licensing)</td>
+            <td>—</td><td>—</td><td>~$30,000 / yr</td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>Net annual benefit</strong></td>
+            <td>—</td><td>—</td><td><strong>~$315,000</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:8.5pt;color:#5a6a7a;margin-top:0.3rem;">
+        * Assumes 50 % of incidents resolved via AI self-service; 52 min avg. time saved per deflected incident; $75/hr blended fully-loaded rate. Excludes L1 helpdesk staff savings.
+      </p>
+    </div>
+
+  </div><!-- /grid -->
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>IT Helpdesk Assistant MVP · Confidential — Internal Use Only</span>
+    <span>Azure OpenAI + Agent Framework + Freshservice</span>
+  </div>
+
+</div><!-- /page -->
+</body>
+</html>
