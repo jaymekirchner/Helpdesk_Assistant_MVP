@@ -5,12 +5,59 @@ import datetime
 
 import psycopg2
 import requests
+from openai import AzureOpenAI
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 load_dotenv()
 
 mcp = FastMCP("IT Helpdesk MCP Server")
+
+# ---------------------------------------------------------------------------
+# Azure OpenAI client (for translation)
+# ---------------------------------------------------------------------------
+_oai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+_oai_key = os.getenv("AZURE_OPENAI_API_KEY", "")
+_oai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
+_oai_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+
+_openai_client: AzureOpenAI | None = None
+if _oai_endpoint and _oai_key and _oai_deployment:
+    _openai_client = AzureOpenAI(
+        api_key=_oai_key,
+        api_version=_oai_api_version,
+        azure_endpoint=_oai_endpoint,
+    )
+
+
+def _translate_to_english(text: str, source_language: str) -> str:
+    """Translate *text* from *source_language* to English using Azure OpenAI.
+    Returns the original text unchanged if the client is unavailable or the call fails."""
+    if not _openai_client or not _oai_deployment:
+        print("[Translation] Azure OpenAI client not configured — skipping translation.")
+        return text
+    try:
+        response = _openai_client.chat.completions.create(
+            model=_oai_deployment,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional translator. Translate the following text "
+                        f"from {source_language} to English. Return ONLY the translated text, "
+                        "with no commentary, preamble, or formatting."
+                    ),
+                },
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2, #randonmness; lower value makes output more deterministic and consistent
+            max_tokens=1024, #approx 750 words
+        )
+        translated = (response.choices[0].message.content or "").strip()
+        return translated if translated else text
+    except Exception as e:
+        print(f"[Translation] Failed to translate text: {e}")
+        return text
 
 # ---------------------------------------------------------------------------
 # Security helpers
@@ -68,6 +115,12 @@ def health_check() -> dict:
         checks["freshworks"] = "configured"
     else:
         checks["freshworks"] = "not configured"
+
+    # Azure OpenAI (translation)
+    if _openai_client and _oai_deployment:
+        checks["azure_openai"] = "configured"
+    else:
+        checks["azure_openai"] = "not configured"
 
     all_ok = all(v in ("ok", "configured") for v in checks.values())
     return {
@@ -187,6 +240,7 @@ def _save_ticket_to_postgres(
     subject: str = "",
     description_text: str = "",
     ticket_type: str = "",
+    source_language: str = "",
 ) -> None:
     """Persist ticket details to demo.tickets. Resolves user_id and device_id from demo.users.
     Tries username first; falls back to first_name + last_name if username is missing or not found.
@@ -223,8 +277,9 @@ def _save_ticket_to_postgres(
                     """
                     INSERT INTO demo.tickets
                         (ticket_id, severity, status, assignment_group, user_id, device_id,
-                         category, created_at, subject, description_text, ticket_type)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         category, created_at, subject, description_text, ticket_type,
+                         source_language)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (ticket_id) DO NOTHING
                     """,
                     (
@@ -239,6 +294,7 @@ def _save_ticket_to_postgres(
                         subject[:255] if subject else None,
                         description_text or None,
                         ticket_type[:50] if ticket_type else None,
+                        source_language[:50] if source_language else None,
                     ),
                 )
         print(f"[Postgres] Ticket {ticket_id} saved to demo.tickets.")
@@ -255,13 +311,15 @@ def create_ticket(
     impacted_system: str = "Unknown",
     first_name: str = "",
     last_name: str = "",
+    source_language: str = "",
 ) -> dict:
     """Create an IT support ticket in Freshworks.
     Provide 'user' (username) or 'first_name'+'last_name' to link the ticket to the correct user record.
     """
     for field, val in [("issue", issue), ("user", user), ("category", category),
                        ("severity", severity), ("impacted_system", impacted_system),
-                       ("first_name", first_name), ("last_name", last_name)]:
+                       ("first_name", first_name), ("last_name", last_name),
+                       ("source_language", source_language)]:
         err = _guard(val, field)
         if err:
             return {"success": False, "error": err, "data": None}
@@ -280,11 +338,24 @@ def create_ticket(
     headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
     requester_email, cc_emails = _resolve_requester_email(user)
+
+    # Translate to English if source language is not English
+    ticket_issue = issue
+    if source_language and source_language.strip().lower() != "english":
+        ticket_issue = _translate_to_english(issue, source_language.strip())
+
     payload = {
         "email": requester_email,
         "cc_emails": cc_emails,
-        "subject": issue[:100],
-        "description": f"Impacted System: {impacted_system}\nCategory: {category}\n\nIssue: {issue}",
+        "subject": ticket_issue[:100],
+        "description": (
+            f"Impacted System: {impacted_system}\nCategory: {category}\n"
+            f"Source Language: {source_language.strip()}\n\n"
+            f"Issue (English): {ticket_issue}\n\n"
+            f"Original ({source_language.strip()}): {issue}"
+        ) if source_language and source_language.strip().lower() != "english" else (
+            f"Impacted System: {impacted_system}\nCategory: {category}\n\nIssue: {issue}"
+        ),
         "status": 2,
         "priority": _map_severity_to_priority(severity),
         "urgency": _map_severity_to_scale3(severity),
@@ -321,6 +392,7 @@ def create_ticket(
             subject=ticket_data.get("subject", ""),
             description_text=ticket_data.get("description_text", ""),
             ticket_type=ticket_data.get("type", ""),
+            source_language=source_language,
         )
 
         return {

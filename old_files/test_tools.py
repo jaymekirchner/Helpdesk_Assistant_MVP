@@ -41,7 +41,7 @@ def _err(message: str) -> _Result:
 # Import appFinal — env vars will be absent so agents stay None,
 # but the tool functions (_call_mcp_tool wrappers) are always defined.
 # ---------------------------------------------------------------------------
-import appFinal  # noqa: E402
+import old_files.appFinal as appFinal  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -8,10 +8,10 @@ from streamlit.errors import StreamlitAPIException
 # Add the current directory to the path so we can import from this project
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import the main logic from the MCP-enabled module
+# Import the main logic from the modular entry point
 APP_IMPORT_ERROR = None
 try:
-    from appFinal import handle_user_message, _call_mcp_tool, _extract_mcp_records
+    from app import handle_user_message, _call_mcp_tool, _extract_mcp_records
 except Exception as import_error:
     APP_IMPORT_ERROR = import_error
 
@@ -311,20 +311,14 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown('<div class="sidebar-info">', unsafe_allow_html=True)
-        st.markdown("### 🛠️ IT Helpdesk Assistant")
-        st.markdown("**Features:**")
-        st.markdown("- Knowledge base search")
-        st.markdown("- User lookup")
-        st.markdown("- Device status check")
-        st.markdown("- Ticket creation")
-        st.markdown("- Smart escalation")
+        st.markdown("### 🛠️ IT Helpdesk Assistant Health Check")
+        # st.markdown("**Features:**")
+        # st.markdown("- Knowledge base search")
+        # st.markdown("- User lookup")
+        # st.markdown("- Device status check")
+        # st.markdown("- Ticket creation")
+        # st.markdown("- Smart escalation")
         st.markdown('</div>', unsafe_allow_html=True)
-
-        # st.markdown("### 📋 Commands")
-        # st.markdown("- Type your IT question")
-        # st.markdown("- 'lookup user [username]'")
-        # st.markdown("- 'check device [device_id]'")
-        # st.markdown("- 'create ticket' for escalation")
 
         # ── MCP Server Status ──────────────────────────────
         health = st.session_state.get("health_status")
@@ -359,7 +353,15 @@ def main():
                 handle_ui_error(error, "The conversation could not be cleared.")
 
     # Main content
-    st.markdown('<h1 class="main-header">IT Helpdesk Assistant</h1>', unsafe_allow_html=True)
+    col_title, col_clear = st.columns([6, 1])
+    with col_title:
+        st.markdown('<h1 class="main-header">IT Helpdesk Assistant</h1>', unsafe_allow_html=True)
+    with col_clear:
+        if st.button("🗑️ Clear", key="main_clear"):
+            st.session_state.conversation_history = []
+            st.session_state.messages = []
+            st.session_state.last_input = ""
+            st.rerun()
     st.markdown("Welcome! I'm your IT support assistant. How can I help you today?")
 
     # Display chat history

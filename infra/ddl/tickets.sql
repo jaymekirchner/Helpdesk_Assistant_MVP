@@ -16,6 +16,7 @@ CREATE TABLE demo.tickets (
 	subject varchar(255) NULL,
 	description_text text NULL,
 	ticket_type varchar(50) NULL,
+	source_language varchar(50) NULL,
 	CONSTRAINT tickets_pkey PRIMARY KEY (ticket_id)
 );
 CREATE INDEX idx_tickets_created_at ON demo.tickets USING btree (created_at);
