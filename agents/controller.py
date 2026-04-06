@@ -122,6 +122,9 @@ def extract_ticket_context(conversation_history: list) -> dict:
             "severity": parsed.get("severity", "Medium"),
             "impacted_system": parsed.get("impacted_system", "Unknown"),
             "user": parsed.get("user", "unknown"),
+            "first_name": parsed.get("first_name", ""),
+            "last_name": parsed.get("last_name", ""),
+            "device_id": parsed.get("device_id", ""),
         }
     except Exception as e:
         print(f"[DEBUG] Ticket context extraction failed: {e} — using defaults")
@@ -131,6 +134,9 @@ def extract_ticket_context(conversation_history: list) -> dict:
             "severity": "Medium",
             "impacted_system": "Unknown",
             "user": "unknown",
+            "first_name": "",
+            "last_name": "",
+            "device_id": "",
         }
 
 
@@ -381,7 +387,8 @@ async def handle_user_message(user_input: str, conversation_history: list):
         )
         action_response = await action_agent.run(lookup_prompt)
         response_text = action_response.text
-        if "user found:" in response_text.lower():
+        error_indicators = ("error", "failed", "not found", "no user", "please provide")
+        if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
         return response_text, True
 
@@ -402,7 +409,8 @@ async def handle_user_message(user_input: str, conversation_history: list):
         )
         action_response = await action_agent.run(lookup_prompt)
         response_text = action_response.text
-        if "user found:" in response_text.lower():
+        error_indicators = ("error", "failed", "not found", "no user", "please provide")
+        if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
         return response_text, True
 

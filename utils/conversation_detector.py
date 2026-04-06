@@ -139,7 +139,10 @@ class ConversationDetector:
             if message.get("role") != "assistant":
                 continue
             content = (message.get("content") or "").lower()
-            return LOOKUP_NEXT_ACTION_PROMPT.lower() in content
+            return (
+                LOOKUP_NEXT_ACTION_PROMPT.lower() in content
+                or ("'device'" in content and "'ticket'" in content and "what would you like" in content)
+            )
         return False
 
     @staticmethod

@@ -33,9 +33,13 @@ TICKET_CONTEXT_EXTRACTOR_SYSTEM = (
     "- category: one of VPN, Email, MFA, Device, Account, Hardware, Software, General\n"
     "- severity: one of Low, Medium, High, Critical — infer from impact described\n"
     "- impacted_system: the specific app, tool, or system affected\n"
-    "- user: username or email if mentioned, otherwise 'unknown'\n\n"
+    "- user: username or email if mentioned, otherwise 'unknown'\n"
+    "- first_name: the user's first name if mentioned, otherwise ''\n"
+    "- last_name: the user's last name if mentioned, otherwise ''\n"
+    "- device_id: the device ID (e.g. LAPTOP-1001) if mentioned, otherwise ''\n\n"
     "Respond ONLY with valid JSON, no markdown, no explanation:\n"
-    '{"issue": "...", "category": "...", "severity": "...", "impacted_system": "...", "user": "..."}'
+    '{"issue": "...", "category": "...", "severity": "...", "impacted_system": "...", '
+    '"user": "...", "first_name": "...", "last_name": "...", "device_id": "..."}'
 )
 
 INPUT_SUMMARIZER_SYSTEM = (

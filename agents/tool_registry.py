@@ -63,13 +63,22 @@ def lookup_user(
 
 @tool(
     name="check_device_status",
-    description="Check the status of a company device by device ID or username. Use for laptop or device status requests.",
+    description="Check the status of a company device by device ID, username, or first and last name. Use for laptop or device status requests.",
 )
 def check_device_status(
-    device_or_username: Annotated[str, Field(description="Device ID (for example LAPTOP-1001) or username (for example john.doe)")]
+    device_or_username: Annotated[str, Field(description="Device ID (for example LAPTOP-1001) or username (for example john.doe). Leave empty if searching by name.")] = "",
+    first_name: Annotated[str, Field(description="Employee first name. Use together with last_name when device ID and username are unknown.")] = "",
+    last_name: Annotated[str, Field(description="Employee last name. Use together with first_name when device ID and username are unknown.")] = "",
 ) -> str:
     try:
-        result = mcp_client.call_tool("check_device_status", {"device_or_username": device_or_username})
+        args: dict = {}
+        if device_or_username:
+            args["device_or_username"] = device_or_username
+        if first_name:
+            args["first_name"] = first_name
+        if last_name:
+            args["last_name"] = last_name
+        result = mcp_client.call_tool("check_device_status", args)
         records = mcp_client.extract_records(result)
         envelope = records[0] if records else {}
         if not isinstance(envelope, dict):
