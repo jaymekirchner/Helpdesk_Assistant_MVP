@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import datetime
 
@@ -10,6 +11,38 @@ from fastmcp import FastMCP
 load_dotenv()
 
 mcp = FastMCP("IT Helpdesk MCP Server")
+
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate prompt-injection or wildcard/bulk-data attempts.
+_INJECTION_PATTERNS = re.compile(
+    r"ignore\s+(previous|prior|above|all)\s+instructions?"
+    r"|print\s+(your\s+)?(prompt|system\s+prompt|instructions?)"
+    r"|act\s+as\s+(a\s+)?(different|new|another|general)"
+    r"|you\s+are\s+now"
+    r"|reveal\s+(your\s+)?(prompt|instructions?|config)"
+    r"|run\s+(a\s+)?query"
+    r"|execute\s+(sql|command|script)"
+    r"|\ball\s+users\b|\ball\s+devices\b|\ball\s+tickets\b"
+    r"|\bselect\s+\*\b|\bdrop\s+table\b|\bdelete\s+from\b",
+    re.IGNORECASE,
+)
+
+_MAX_FIELD_LEN = 200  # reasonable upper bound for any single lookup field
+
+
+def _guard(value: str, field_name: str) -> str | None:
+    """Return an error message string if the value looks malicious or invalid,
+    otherwise return None (safe to proceed)."""
+    if not isinstance(value, str):
+        return f"Invalid type for '{field_name}'."
+    if len(value) > _MAX_FIELD_LEN:
+        return f"'{field_name}' value exceeds the maximum allowed length."
+    if _INJECTION_PATTERNS.search(value):
+        return f"Suspicious or disallowed content detected in '{field_name}'."
+    return None
 
 
 @mcp.tool
@@ -119,11 +152,17 @@ def _map_category_to_ticket_type(category: str) -> str:
     return mapping.get(category, "Service Request")
 
 
-def _resolve_requester_email(user: str) -> str:
+def _resolve_requester_email(user: str) -> tuple[str, list[str]]:
+    """Return (requester_email, cc_emails).
+    When the user has a valid email address, they are the requester and the
+    default helpdesk address is CC'd.  Otherwise the default address is the
+    requester and cc_emails is empty.
+    """
     default_email = os.getenv("FRESHWORKS_DEFAULT_REQUESTER_EMAIL", "helpdesk@corp.com")
     if user and "@" in user:
-        return user
-    return default_email
+        cc = [default_email] if default_email and default_email.lower() != user.lower() else []
+        return user, cc
+    return default_email, []
 
 
 def _map_freshworks_status(status_code) -> str:
@@ -220,6 +259,13 @@ def create_ticket(
     """Create an IT support ticket in Freshworks.
     Provide 'user' (username) or 'first_name'+'last_name' to link the ticket to the correct user record.
     """
+    for field, val in [("issue", issue), ("user", user), ("category", category),
+                       ("severity", severity), ("impacted_system", impacted_system),
+                       ("first_name", first_name), ("last_name", last_name)]:
+        err = _guard(val, field)
+        if err:
+            return {"success": False, "error": err, "data": None}
+
     freshworks_api_key = os.getenv("FRESHWORKS_API_KEY", "")
     endpoint = _freshworks_endpoint()
 
@@ -233,8 +279,10 @@ def create_ticket(
     auth = base64.b64encode(f"{freshworks_api_key}:".encode()).decode()
     headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
+    requester_email, cc_emails = _resolve_requester_email(user)
     payload = {
-        "email": _resolve_requester_email(user),
+        "email": requester_email,
+        "cc_emails": cc_emails,
         "subject": issue[:100],
         "description": f"Impacted System: {impacted_system}\nCategory: {category}\n\nIssue: {issue}",
         "status": 2,
@@ -304,6 +352,11 @@ def create_ticket(
 @mcp.tool
 def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -> dict:
     """Look up a corporate user by username OR by first and last name (Postgres only)."""
+    for field, val in [("username", username), ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
     if not username and not (first_name and last_name):
         return {
             "success": False,
@@ -373,6 +426,9 @@ def lookup_ticket(ticket_id: str) -> dict:
     """Look up ticket details from demo.tickets joined with demo.users for requester contact info."""
     if not ticket_id or not ticket_id.strip():
         return {"success": False, "error": "Provide a ticket_id.", "data": None}
+    err = _guard(ticket_id, "ticket_id")
+    if err:
+        return {"success": False, "error": err, "data": None}
     conn_str = _postgres_conn_string()
     if not conn_str:
         return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
@@ -421,6 +477,11 @@ def lookup_tickets_by_user(username: str = "", first_name: str = "", last_name: 
     username = (username or "").strip()
     first_name = (first_name or "").strip()
     last_name = (last_name or "").strip()
+    for field, val in [("username", username), ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
     if not username and not (first_name and last_name):
         return {"success": False, "error": "Provide a username or both first_name and last_name.", "data": None}
     conn_str = _postgres_conn_string()
@@ -477,28 +538,68 @@ def lookup_tickets_by_user(username: str = "", first_name: str = "", last_name: 
 
 
 @mcp.tool
-def check_device_status(device_or_username: str) -> dict:
-    """Check device state by device ID or username (Postgres only)."""
+def check_device_status(
+    device_or_username: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> dict:
+    """Check device state by device ID, username, or first and last name (Postgres only).
+    Provide 'device_or_username' for a device ID or username lookup, or provide both
+    'first_name' and 'last_name' to look up by the user's full name.
+    """
+    device_or_username = (device_or_username or "").strip()
+    first_name = (first_name or "").strip()
+    last_name = (last_name or "").strip()
+
+    for field, val in [("device_or_username", device_or_username),
+                       ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
+
+    if not device_or_username and not (first_name and last_name):
+        return {
+            "success": False,
+            "error": "Provide a device ID or username via 'device_or_username', or provide both 'first_name' and 'last_name'.",
+            "data": None,
+        }
+
     conn = _postgres_conn_string()
     if not conn:
         return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
     try:
         with psycopg2.connect(conn) as connection:
             with connection.cursor() as cursor:
+                conditions = []
+                params = []
+
+                if device_or_username:
+                    conditions.append("UPPER(d.device_id) = UPPER(%s)")
+                    params.append(device_or_username)
+                    conditions.append("LOWER(u.username) = LOWER(%s)")
+                    params.append(device_or_username)
+
+                if first_name and last_name:
+                    conditions.append("(LOWER(u.first_name) = LOWER(%s) AND LOWER(u.last_name) = LOWER(%s))")
+                    params.extend([first_name, last_name])
+
+                where_clause = " OR ".join(conditions)
                 cursor.execute(
-                    """
-                    SELECT d.device_id, d.status, d.vpn_client, d.last_seen, u.username
+                    f"""
+                    SELECT d.device_id, d.status, d.vpn_client, d.last_seen, u.username,
+                           u.first_name, u.last_name
                     FROM demo.devices d
                     LEFT JOIN demo.users u ON u.device_id = d.device_id
-                    WHERE UPPER(d.device_id) = UPPER(%s)
-                       OR LOWER(u.username) = LOWER(%s)
+                    WHERE {where_clause}
                     LIMIT 1
                     """,
-                    (device_or_username, device_or_username),
+                    params,
                 )
                 row = cursor.fetchone()
                 if not row:
-                    return {"success": False, "error": f"No device found for identifier '{device_or_username}'.", "data": None}
+                    identifier = device_or_username or f"{first_name} {last_name}"
+                    return {"success": False, "error": f"No device found for identifier '{identifier}'.", "data": None}
                 return {
                     "success": True,
                     "error": None,
@@ -508,6 +609,8 @@ def check_device_status(device_or_username: str) -> dict:
                         "vpn_client": row[2],
                         "last_seen": str(row[3]),
                         "username": row[4] or "unknown",
+                        "first_name": row[5] or "",
+                        "last_name": row[6] or "",
                     },
                 }
     except psycopg2.Error as e:
