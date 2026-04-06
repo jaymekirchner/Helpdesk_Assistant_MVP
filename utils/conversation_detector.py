@@ -17,6 +17,10 @@ from config.constants import (
     KB_TICKET_IDENTITY_METHOD_PROMPT,
     KB_TICKET_USERNAME_INPUT_PROMPT,
     KB_TICKET_EMAIL_INPUT_PROMPT,
+    KB_TICKET_FIRST_NAME_PROMPT,
+    KB_TICKET_LAST_NAME_PROMPT,
+    CC_EMAIL_PROMPT,
+    CC_EMAIL_INPUT_PROMPT,
     TICKET_LOOKUP_NUMBER_PROMPT,
     TICKET_LOOKUP_METHOD_PROMPT,
     TICKET_LOOKUP_USER_PROMPT,
@@ -166,12 +170,56 @@ class ConversationDetector:
         return False
 
     @staticmethod
+    def last_assistant_asked_for_kb_ticket_first_name(conversation_history: list) -> bool:
+        for message in reversed(conversation_history):
+            if message.get("role") != "assistant":
+                continue
+            return KB_TICKET_FIRST_NAME_PROMPT.lower() in (message.get("content") or "").lower()
+        return False
+
+    @staticmethod
+    def last_assistant_asked_for_kb_ticket_last_name(conversation_history: list) -> bool:
+        for message in reversed(conversation_history):
+            if message.get("role") != "assistant":
+                continue
+            return KB_TICKET_LAST_NAME_PROMPT.lower() in (message.get("content") or "").lower()
+        return False
+
+    @staticmethod
+    def get_kb_ticket_first_name_from_history(conversation_history: list) -> str:
+        for i, msg in enumerate(conversation_history):
+            if (
+                msg.get("role") == "assistant"
+                and KB_TICKET_FIRST_NAME_PROMPT.lower() in (msg.get("content") or "").lower()
+                and i + 1 < len(conversation_history)
+                and conversation_history[i + 1].get("role") == "user"
+            ):
+                return conversation_history[i + 1].get("content", "").strip()
+        return ""
+
+    @staticmethod
     def last_assistant_asked_for_ticket_number(conversation_history: list) -> bool:
         for message in reversed(conversation_history):
             if message.get("role") != "assistant":
                 continue
             content = (message.get("content") or "").lower()
             return TICKET_LOOKUP_NUMBER_PROMPT.lower() in content
+        return False
+
+    @staticmethod
+    def last_assistant_asked_for_cc_email(conversation_history: list) -> bool:
+        for message in reversed(conversation_history):
+            if message.get("role") != "assistant":
+                continue
+            return CC_EMAIL_PROMPT.lower() in (message.get("content") or "").lower()
+        return False
+
+    @staticmethod
+    def last_assistant_asked_for_cc_email_input(conversation_history: list) -> bool:
+        for message in reversed(conversation_history):
+            if message.get("role") != "assistant":
+                continue
+            return CC_EMAIL_INPUT_PROMPT.lower() in (message.get("content") or "").lower()
         return False
 
     @staticmethod

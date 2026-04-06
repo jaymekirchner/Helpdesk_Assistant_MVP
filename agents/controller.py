@@ -19,6 +19,10 @@ from config.constants import (
     KB_TICKET_IDENTITY_METHOD_PROMPT,
     KB_TICKET_USERNAME_INPUT_PROMPT,
     KB_TICKET_EMAIL_INPUT_PROMPT,
+    KB_TICKET_FIRST_NAME_PROMPT,
+    KB_TICKET_LAST_NAME_PROMPT,
+    CC_EMAIL_PROMPT,
+    CC_EMAIL_INPUT_PROMPT,
     TICKET_LOOKUP_NUMBER_PROMPT,
     TICKET_LOOKUP_METHOD_PROMPT,
     TICKET_LOOKUP_USER_PROMPT,
@@ -38,15 +42,22 @@ detector = ConversationDetector()
 # ── Helper functions ─────────────────────────────────────────────────────────
 
 def build_ticket_prompt(ctx: dict) -> str:
-    return (
+    prompt = (
         f"Create an IT support ticket with the following details:\n"
         f"- user: {ctx['user']}\n"
         f"- issue: {ctx['issue']}\n"
         f"- category: {ctx['category']}\n"
         f"- severity: {ctx['severity']}\n"
         f"- impacted_system: {ctx['impacted_system']}\n"
-        "Call create_ticket now with these exact values."
     )
+    if ctx.get("first_name"):
+        prompt += f"- first_name: {ctx['first_name']}\n"
+    if ctx.get("last_name"):
+        prompt += f"- last_name: {ctx['last_name']}\n"
+    if ctx.get("additional_cc_emails"):
+        prompt += f"- additional_cc_emails: {ctx['additional_cc_emails']}\n"
+    prompt += "Call create_ticket now with these exact values."
+    return prompt
 
 
 def summarize_long_input(user_input: str) -> str:
@@ -173,45 +184,79 @@ async def handle_user_message(user_input: str, conversation_history: list):
             "Reply **Yes** to proceed, or correct any details."
         ), True
 
-    # Pre-check: KB ticket flow — email value received
-    if conversation_history and detector.last_assistant_asked_for_kb_ticket_email(conversation_history):
+    # Pre-check: CC email address received — create the ticket with the extra CC
+    if conversation_history and detector.last_assistant_asked_for_cc_email_input(conversation_history):
         email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b", user_input)
         if not email_match:
             return "That doesn't look like a valid email address. Please try again.", True
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
         ctx = extract_ticket_context(conversation_history)
-        ctx["user"] = email_match.group(0)
+        ctx["additional_cc_emails"] = [email_match.group(0)]
         tool_prompt = build_ticket_prompt(ctx)
-        print(f"[DEBUG] KB escalation ticket prompt (email): {tool_prompt}")
+        print(f"[DEBUG] Ticket prompt with additional CC: {tool_prompt}")
         action_response = await action_agent.run(tool_prompt)
         return action_response.text, True
 
-    # Pre-check: KB ticket flow — username value received
+    # Pre-check: CC email yes/no response
+    if conversation_history and detector.last_assistant_asked_for_cc_email(conversation_history):
+        choice = user_input.strip().lower()
+        if choice in ("yes", "yes please", "yep", "yeah", "sure", "ok", "okay"):
+            return CC_EMAIL_INPUT_PROMPT, True
+        # "No" or anything else → proceed with ticket creation (no additional CC)
+        if not action_agent:
+            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        ctx = extract_ticket_context(conversation_history)
+        tool_prompt = build_ticket_prompt(ctx)
+        print(f"[DEBUG] Ticket prompt (no additional CC): {tool_prompt}")
+        action_response = await action_agent.run(tool_prompt)
+        return action_response.text, True
+
+    # Pre-check: KB ticket flow — email value received → ask about CC
+    if conversation_history and detector.last_assistant_asked_for_kb_ticket_email(conversation_history):
+        email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b", user_input)
+        if not email_match:
+            return "That doesn't look like a valid email address. Please try again.", True
+        print(f"[DEBUG] KB escalation (email) — prompting for CC email")
+        return CC_EMAIL_PROMPT, True
+
+    # Pre-check: KB ticket flow — username value received → ask about CC
     if conversation_history and detector.last_assistant_asked_for_kb_ticket_username(conversation_history):
         username = user_input.strip()
         if not username:
             return KB_TICKET_USERNAME_INPUT_PROMPT, True
-        if not action_agent:
-            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        ctx = extract_ticket_context(conversation_history)
-        ctx["user"] = detector.normalize_lookup_username(username, "username")
-        tool_prompt = build_ticket_prompt(ctx)
-        print(f"[DEBUG] KB escalation ticket prompt (username): {tool_prompt}")
-        action_response = await action_agent.run(tool_prompt)
-        return action_response.text, True
+        print(f"[DEBUG] KB escalation (username) — prompting for CC email")
+        return CC_EMAIL_PROMPT, True
 
-    # Pre-check: KB ticket flow — method choice (username vs email)
+    # Pre-check: KB ticket flow — last name received (name-based identity) → ask about CC
+    if conversation_history and detector.last_assistant_asked_for_kb_ticket_last_name(conversation_history):
+        last_name = user_input.strip()
+        if not last_name:
+            return KB_TICKET_LAST_NAME_PROMPT, True
+        first_name = detector.get_kb_ticket_first_name_from_history(conversation_history)
+        if not first_name:
+            return "I couldn't retrieve the first name. Please start over.", True
+        print(f"[DEBUG] KB escalation (name) — prompting for CC email")
+        return CC_EMAIL_PROMPT, True
+
+    # Pre-check: KB ticket flow — first name received, ask for last name
+    if conversation_history and detector.last_assistant_asked_for_kb_ticket_first_name(conversation_history):
+        print("[Agent Controller] KB ticket first name received — asking for last name")
+        return KB_TICKET_LAST_NAME_PROMPT, True
+
+    # Pre-check: KB ticket flow — method choice (username vs email vs name)
     if conversation_history and detector.last_assistant_asked_for_kb_ticket_identity_method(conversation_history):
         choice = user_input.strip().lower()
         if "username" in choice:
             return KB_TICKET_USERNAME_INPUT_PROMPT, True
         elif "email" in choice:
             return KB_TICKET_EMAIL_INPUT_PROMPT, True
+        elif "name" in choice:
+            return KB_TICKET_FIRST_NAME_PROMPT, True
         else:
             return KB_TICKET_IDENTITY_METHOD_PROMPT, True
 
-    # Pre-check: ticket confirmation following escalation offer
+    # Pre-check: ticket confirmation following escalation offer → ask about CC
     is_confirmation = (
         detector.looks_like_ticket_confirmation(user_input)
         and detector.last_assistant_offered_escalation(conversation_history)
@@ -224,10 +269,8 @@ async def handle_user_message(user_input: str, conversation_history: list):
         if ctx["user"] == "unknown":
             print("[Agent Controller] User identity unknown — requesting identity method before ticket creation")
             return KB_TICKET_IDENTITY_METHOD_PROMPT, True
-        tool_prompt = build_ticket_prompt(ctx)
-        print(f"[DEBUG] Ticket prompt sent to agent: {tool_prompt}")
-        action_response = await action_agent.run(tool_prompt)
-        return action_response.text, True
+        print("[Agent Controller] Ticket confirmation — prompting for CC email")
+        return CC_EMAIL_PROMPT, True
 
     # Identity for lookup
     if conversation_history and detector.last_assistant_requested_identity_for_lookup(conversation_history):

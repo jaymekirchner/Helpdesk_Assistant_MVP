@@ -205,17 +205,70 @@ def _map_category_to_ticket_type(category: str) -> str:
     return mapping.get(category, "Service Request")
 
 
-def _resolve_requester_email(user: str) -> tuple[str, list[str]]:
-    """Return (requester_email, cc_emails).
-    When the user has a valid email address, they are the requester and the
-    default helpdesk address is CC'd.  Otherwise the default address is the
-    requester and cc_emails is empty.
+def _resolve_requester_email(
+    user: str = "",
+    first_name: str = "",
+    last_name: str = "",
+    additional_cc_emails: list[str] | None = None,
+) -> tuple[str, list[str], str]:
+    """Return (requester_email, cc_emails, device_id).
+
+    Looks up the user in demo.users by username, email, or first+last name to
+    find their email and device_id.  FRESHWORKS_DEFAULT_REQUESTER_EMAIL is
+    always added to the CC list.  Any *additional_cc_emails* are appended.
+    Falls back to the default email as the requester when no match is found.
     """
     default_email = os.getenv("FRESHWORKS_DEFAULT_REQUESTER_EMAIL", "helpdesk@corp.com")
-    if user and "@" in user:
-        cc = [default_email] if default_email and default_email.lower() != user.lower() else []
-        return user, cc
-    return default_email, []
+    requester_email = ""
+    device_id = ""
+
+    conn_str = _postgres_conn_string()
+    if conn_str:
+        try:
+            with psycopg2.connect(conn_str) as conn:
+                with conn.cursor() as cur:
+                    row = None
+                    # Try username first
+                    if user and user != "unknown" and "@" not in user:
+                        cur.execute(
+                            "SELECT email, device_id FROM demo.users WHERE LOWER(username) = %s",
+                            (user.lower(),),
+                        )
+                        row = cur.fetchone()
+                    # Try email
+                    if not row and user and "@" in user:
+                        cur.execute(
+                            "SELECT email, device_id FROM demo.users WHERE LOWER(email) = %s",
+                            (user.lower(),),
+                        )
+                        row = cur.fetchone()
+                    # Try first + last name
+                    if not row and first_name and last_name:
+                        cur.execute(
+                            "SELECT email, device_id FROM demo.users "
+                            "WHERE LOWER(first_name) = %s AND LOWER(last_name) = %s",
+                            (first_name.lower(), last_name.lower()),
+                        )
+                        row = cur.fetchone()
+                    if row:
+                        requester_email = row[0] or ""
+                        device_id = row[1] or ""
+        except psycopg2.Error as e:
+            print(f"[_resolve_requester_email] DB lookup failed: {e}")
+
+    if not requester_email:
+        requester_email = default_email
+
+    # Build CC list — always include the default helpdesk email
+    cc_emails: list[str] = []
+    if default_email and default_email.lower() != requester_email.lower():
+        cc_emails.append(default_email)
+
+    for addr in (additional_cc_emails or []):
+        if addr and addr.lower() not in {e.lower() for e in cc_emails} and addr.lower() != requester_email.lower():
+            cc_emails.append(addr)
+
+    return requester_email, cc_emails, device_id
 
 
 def _map_freshworks_status(status_code) -> str:
@@ -312,9 +365,11 @@ def create_ticket(
     first_name: str = "",
     last_name: str = "",
     source_language: str = "",
+    additional_cc_emails: list[str] | None = None,
 ) -> dict:
     """Create an IT support ticket in Freshworks.
     Provide 'user' (username) or 'first_name'+'last_name' to link the ticket to the correct user record.
+    'additional_cc_emails' adds extra addresses to the CC list.
     """
     for field, val in [("issue", issue), ("user", user), ("category", category),
                        ("severity", severity), ("impacted_system", impacted_system),
@@ -337,7 +392,10 @@ def create_ticket(
     auth = base64.b64encode(f"{freshworks_api_key}:".encode()).decode()
     headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
 
-    requester_email, cc_emails = _resolve_requester_email(user)
+    requester_email, cc_emails, device_id = _resolve_requester_email(
+        user=user, first_name=first_name, last_name=last_name,
+        additional_cc_emails=additional_cc_emails,
+    )
 
     # Translate to English if source language is not English
     ticket_issue = issue

@@ -179,6 +179,9 @@ def create_ticket(
     severity: Annotated[str, Field(description="Business impact severity: Low, Medium, High, Critical")] = "Medium",
     impacted_system: Annotated[str, Field(description="Impacted application or system")] = "Unknown",
     source_language: Annotated[str, Field(description="The language the user wrote in, e.g. 'Spanish', 'French'. Omit or pass 'English' if the user wrote in English.")] = "English",
+    first_name: Annotated[str, Field(description="Requester's first name for user lookup")] = "",
+    last_name: Annotated[str, Field(description="Requester's last name for user lookup")] = "",
+    additional_cc_emails: Annotated[list[str], Field(description="Extra email addresses to CC on the ticket")] = [],
 ) -> str:
     """Create a ticket via MCP server tool."""
     try:
@@ -191,6 +194,9 @@ def create_ticket(
                 "severity": severity,
                 "impacted_system": impacted_system,
                 "source_language": source_language.strip() if source_language else "",
+                "first_name": first_name,
+                "last_name": last_name,
+                "additional_cc_emails": additional_cc_emails or [],
             },
         )
         records = mcp_client.extract_records(result)
