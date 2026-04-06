@@ -139,11 +139,19 @@ LOOKUP_NEXT_ACTION_PROMPT = (
 
 KB_TICKET_IDENTITY_METHOD_PROMPT = (
     "To open a support ticket I'll need to identify you. "
-    "Would you like to provide your username or your email address? "
-    "Please reply with 'username' or 'email'."
+    "Would you like to provide your username, email address, or first and last name? "
+    "Please reply with 'username', 'email', or 'name'."
 )
 KB_TICKET_USERNAME_INPUT_PROMPT = "Please provide your username (for example, john.doe)."
 KB_TICKET_EMAIL_INPUT_PROMPT = "Please provide your email address."
+KB_TICKET_FIRST_NAME_PROMPT = "Please provide your first name."
+KB_TICKET_LAST_NAME_PROMPT = "Please provide your last name."
+
+CC_EMAIL_PROMPT = (
+    "Would you like to add another email address to be CC'd on this ticket? "
+    "Reply 'yes' or 'no'."
+)
+CC_EMAIL_INPUT_PROMPT = "Please provide the email address to add to CC."
 
 TICKET_LOOKUP_NUMBER_PROMPT = (
     "Please provide the ticket number you'd like to look up (for example, 12345)."
