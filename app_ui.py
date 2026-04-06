@@ -186,8 +186,10 @@ def initialize_session_state():
     # add statement so that the user input is cleared after 
     if 'last_input' not in st.session_state:
         st.session_state.last_input = ""
-        if 'health_status' not in st.session_state:
-            st.session_state.health_status = _run_health_check()
+    if 'pending_input' not in st.session_state:
+        st.session_state.pending_input = ""
+    if 'health_status' not in st.session_state:
+        st.session_state.health_status = _run_health_check()
 
 
 def add_message(role, content):
@@ -261,60 +263,50 @@ def display_chat_history():
     st.markdown('</div>', unsafe_allow_html=True)
 
 async def process_user_input(user_input):
-    """Process user input and get assistant response"""
+    """Call the agent and append its response. User message is already in session state."""
     if not user_input.strip():
         return
 
-    # Add user message to history
-    add_message('user', user_input)
-
-    # Convert messages to the format expected by app4.py
+    # Build history excluding the current user message (already appended before the rerun)
     conversation_history = [
         {'role': msg['role'], 'content': msg['content']}
-        for msg in st.session_state.messages[:-1]  # Exclude the current user message
+        for msg in st.session_state.messages[:-1]
     ]
 
-    # Get assistant response
-    with st.spinner("Assistant is thinking..."):
-        try:
-            response, should_store = await handle_user_message(user_input, conversation_history)
-
-            # Add assistant response
-            add_message('assistant', response)
-
-            # Update conversation history for app4.py
-            if should_store:
-                st.session_state.conversation_history = conversation_history + [
-                    {'role': 'user', 'content': user_input},
-                    {'role': 'assistant', 'content': response}
-                ]
-
-        except Exception as e:
-            error_msg = f"Sorry, I encountered an error: {str(e)}"
-            add_message('assistant', error_msg)
+    try:
+        response, should_store = await handle_user_message(user_input, conversation_history)
+        add_message('assistant', response)
+        if should_store:
+            st.session_state.conversation_history = conversation_history + [
+                {'role': 'user', 'content': user_input},
+                {'role': 'assistant', 'content': response}
+            ]
+    except Exception as e:
+        add_message('assistant', f"Sorry, I encountered an error: {str(e)}")
 
 
 def submit_user_input(user_input):
-    """Run one submission cycle and reset input state safely."""
-    try:
-        asyncio.run(process_user_input(user_input))
-        st.session_state.typing = False
-        st.session_state.user_input = ""
-        st.session_state.last_input = ""
-        st.rerun()
-    except StreamlitAPIException as error:
-        st.session_state.typing = False
-        st.session_state.user_input = user_input
-        st.session_state.last_input = user_input
-        handle_ui_error(error, "The chat input could not be submitted.")
-    except Exception as error:
-        st.session_state.typing = False
-        st.session_state.user_input = user_input
-        st.session_state.last_input = user_input
-        handle_ui_error(error, "The request could not be processed.")
+    """Phase 1: add the user message immediately and rerun so it appears straight away.
+    Phase 2 (pending_input processing) runs on the next render cycle."""
+    add_message('user', user_input)
+    st.session_state.pending_input = user_input
+    st.session_state.typing = True
+    st.session_state.last_input = ""
+    st.rerun()
 
 def main():
     initialize_session_state()
+
+    # Phase 2: pending input — user message is already displayed; now fetch the agent response
+    if st.session_state.get('pending_input'):
+        pending = st.session_state.pending_input
+        st.session_state.pending_input = ""
+        try:
+            asyncio.run(process_user_input(pending))
+        except Exception as error:
+            handle_ui_error(error, "The request could not be processed.")
+        st.session_state.typing = False
+        st.rerun()
 
     # Sidebar
     with st.sidebar:
@@ -390,9 +382,7 @@ def main():
 
         # Process input
         if send_button and user_input:
-            st.session_state.typing = True
             submit_user_input(user_input)
-            st.session_state.typing = False
 
     st.markdown("""
     <div style='margin-top:1rem;padding:0.8rem 1rem;border-top:1px solid rgba(20,70,120,0.14);text-align:center;color:#4f637a;font-size:0.86rem;'>

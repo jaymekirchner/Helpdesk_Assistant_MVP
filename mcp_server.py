@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import datetime
 
@@ -10,6 +11,38 @@ from fastmcp import FastMCP
 load_dotenv()
 
 mcp = FastMCP("IT Helpdesk MCP Server")
+
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate prompt-injection or wildcard/bulk-data attempts.
+_INJECTION_PATTERNS = re.compile(
+    r"ignore\s+(previous|prior|above|all)\s+instructions?"
+    r"|print\s+(your\s+)?(prompt|system\s+prompt|instructions?)"
+    r"|act\s+as\s+(a\s+)?(different|new|another|general)"
+    r"|you\s+are\s+now"
+    r"|reveal\s+(your\s+)?(prompt|instructions?|config)"
+    r"|run\s+(a\s+)?query"
+    r"|execute\s+(sql|command|script)"
+    r"|\ball\s+users\b|\ball\s+devices\b|\ball\s+tickets\b"
+    r"|\bselect\s+\*\b|\bdrop\s+table\b|\bdelete\s+from\b",
+    re.IGNORECASE,
+)
+
+_MAX_FIELD_LEN = 200  # reasonable upper bound for any single lookup field
+
+
+def _guard(value: str, field_name: str) -> str | None:
+    """Return an error message string if the value looks malicious or invalid,
+    otherwise return None (safe to proceed)."""
+    if not isinstance(value, str):
+        return f"Invalid type for '{field_name}'."
+    if len(value) > _MAX_FIELD_LEN:
+        return f"'{field_name}' value exceeds the maximum allowed length."
+    if _INJECTION_PATTERNS.search(value):
+        return f"Suspicious or disallowed content detected in '{field_name}'."
+    return None
 
 
 @mcp.tool
@@ -226,6 +259,13 @@ def create_ticket(
     """Create an IT support ticket in Freshworks.
     Provide 'user' (username) or 'first_name'+'last_name' to link the ticket to the correct user record.
     """
+    for field, val in [("issue", issue), ("user", user), ("category", category),
+                       ("severity", severity), ("impacted_system", impacted_system),
+                       ("first_name", first_name), ("last_name", last_name)]:
+        err = _guard(val, field)
+        if err:
+            return {"success": False, "error": err, "data": None}
+
     freshworks_api_key = os.getenv("FRESHWORKS_API_KEY", "")
     endpoint = _freshworks_endpoint()
 
@@ -312,6 +352,11 @@ def create_ticket(
 @mcp.tool
 def lookup_user(username: str = "", first_name: str = "", last_name: str = "") -> dict:
     """Look up a corporate user by username OR by first and last name (Postgres only)."""
+    for field, val in [("username", username), ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
     if not username and not (first_name and last_name):
         return {
             "success": False,
@@ -381,6 +426,9 @@ def lookup_ticket(ticket_id: str) -> dict:
     """Look up ticket details from demo.tickets joined with demo.users for requester contact info."""
     if not ticket_id or not ticket_id.strip():
         return {"success": False, "error": "Provide a ticket_id.", "data": None}
+    err = _guard(ticket_id, "ticket_id")
+    if err:
+        return {"success": False, "error": err, "data": None}
     conn_str = _postgres_conn_string()
     if not conn_str:
         return {"success": False, "error": "AZURE_POSTGRESQL_CONNECTION_STRING is not configured.", "data": None}
@@ -429,6 +477,11 @@ def lookup_tickets_by_user(username: str = "", first_name: str = "", last_name: 
     username = (username or "").strip()
     first_name = (first_name or "").strip()
     last_name = (last_name or "").strip()
+    for field, val in [("username", username), ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
     if not username and not (first_name and last_name):
         return {"success": False, "error": "Provide a username or both first_name and last_name.", "data": None}
     conn_str = _postgres_conn_string()
@@ -497,6 +550,13 @@ def check_device_status(
     device_or_username = (device_or_username or "").strip()
     first_name = (first_name or "").strip()
     last_name = (last_name or "").strip()
+
+    for field, val in [("device_or_username", device_or_username),
+                       ("first_name", first_name), ("last_name", last_name)]:
+        if val:
+            err = _guard(val, field)
+            if err:
+                return {"success": False, "error": err, "data": None}
 
     if not device_or_username and not (first_name and last_name):
         return {
