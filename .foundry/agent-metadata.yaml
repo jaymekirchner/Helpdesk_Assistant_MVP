@@ -1,0 +1,91 @@
+# .foundry/agent-metadata.yaml
+# Azure AI Foundry workspace metadata for the IT Helpdesk Agent.
+# Used by run_eval.py, the Foundry observability skill, and CI/CD pipelines.
+#
+# See: https://aka.ms/foundry-agent-metadata
+
+schemaVersion: "1.0"
+
+# ── Agent identity ────────────────────────────────────────────────────────────
+agent:
+  name: helpdesk-assistant
+  description: >
+    IT Helpdesk Assistant powered by Microsoft Agent Framework.
+    Handles triage, knowledge-base lookup, and IT action execution
+    (user lookup, device checks, ticket management).
+  framework: microsoft-agent-framework
+  language: python
+
+# ── Evaluation configuration ──────────────────────────────────────────────────
+evaluation:
+  # Custom evaluators shipped alongside this agent.
+  evaluators:
+    - id: tool_selection_accuracy
+      path: evaluation/evaluators/tool_selection_accuracy.py
+      class: ToolSelectionAccuracyEvaluator
+      description: >
+        Measures whether the ActionAgent invokes the correct MCP tool for
+        each IT helpdesk request.  Requires no LLM judge.
+      thresholds:
+        tool_selection_accuracy: 0.80        # fail CI below 80 %
+
+    - id: escalation_accuracy
+      path: evaluation/evaluators/escalation_accuracy.py
+      class: EscalationAccuracyEvaluator
+      description: >
+        Measures whether the EscalationService correctly appends or withholds
+        the escalation warning for agent responses.  Includes false-positive
+        and false-negative sub-metrics.
+      thresholds:
+        escalation_accuracy: 0.80            # fail CI below 80 %
+        false_escalation_rate: 0.20          # alert if FPR exceeds 20 %
+        missed_escalation_rate: 0.15         # alert if FNR exceeds 15 %
+
+  # Test datasets
+  datasets:
+    tool_selection:
+      path: evaluation/datasets/tool_selection_test_cases.jsonl
+      description: >
+        25 IT helpdesk queries with ground-truth expected_tool labels
+        (lookup_user, check_device_status, create_ticket, lookup_ticket,
+        lookup_tickets_by_user).
+
+    escalation:
+      path: evaluation/datasets/escalation_test_cases.jsonl
+      description: >
+        15 mock agent responses with expected_escalation ground-truth flags
+        covering both confident resolution and uncertain/incomplete answers.
+
+  # Where runner.py writes its output before calling evaluate().
+  results_dir: evaluation/results
+
+# ── Environments ──────────────────────────────────────────────────────────────
+defaultEnvironment: development
+
+environments:
+  development:
+    description: Local development — no Foundry project required.
+    variables:
+      AZURE_OPENAI_ENDPOINT: ""       # set in .env
+      AZURE_OPENAI_API_KEY: ""
+      AZURE_OPENAI_DEPLOYMENT: ""
+      AZURE_SEARCH_ENDPOINT: ""
+      AZURE_SEARCH_KEY: ""
+      AZURE_SEARCH_INDEX: ""
+      MCP_SERVER_URL: "http://127.0.0.1:8001/mcp"
+
+  staging:
+    description: Staging — Foundry project required for metric upload.
+    variables:
+      AZURE_AI_PROJECT_ENDPOINT: ""   # set in CI secrets
+      AZURE_SUBSCRIPTION_ID: ""
+      AZURE_RESOURCE_GROUP: ""
+      EVAL_PASS_THRESHOLD: "0.80"
+
+  production:
+    description: Production — stricter thresholds.
+    variables:
+      AZURE_AI_PROJECT_ENDPOINT: ""
+      AZURE_SUBSCRIPTION_ID: ""
+      AZURE_RESOURCE_GROUP: ""
+      EVAL_PASS_THRESHOLD: "0.90"

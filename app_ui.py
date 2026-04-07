@@ -381,11 +381,21 @@ def main():
         if send_button and user_input:
             submit_user_input(user_input)
 
-    # Auto-focus the text input after each render
+
+    # Improved auto-focus for the chat input box after each render
     st.markdown("""
     <script>
-    const input = window.parent.document.querySelector('input[type="text"]');
-    if (input) { input.focus(); }
+    // Try to focus the Streamlit chat input box reliably
+    window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            // Find the input inside the chat form
+            const chatForm = window.parent.document.querySelector('form[data-testid="stForm"]');
+            if (chatForm) {
+                const input = chatForm.querySelector('input[type="text"]');
+                if (input) { input.focus(); }
+            }
+        }, 100);
+    });
     </script>
     """, unsafe_allow_html=True)
 

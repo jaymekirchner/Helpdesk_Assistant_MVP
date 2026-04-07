@@ -62,6 +62,8 @@ TOOL_REQUEST_SIGNALS = [
     "ticket details",
     "check ticket",
     "escalate",
+    # "check my device",
+    # "check device for",
 ]
 
 TICKET_LOOKUP_SIGNALS = [
@@ -78,6 +80,9 @@ TICKET_LOOKUP_SIGNALS = [
     "find tickets",
     "search ticket",
     "search tickets",
+    # "show all my tickets",
+    # "show tickets",
+    # "show all tickets",
 ]
 
 TICKET_REQUEST_SIGNALS = [
