@@ -1,0 +1,34 @@
+{"query": "Look up user john.doe in the directory", "expected_tool": "lookup_user"}
+{"query": "Find information for employee jane.smith", "expected_tool": "lookup_user"}
+{"query": "Who is the employee with username mike.jones?", "expected_tool": "lookup_user"}
+{"query": "Can you get me the details for user alice.wong?", "expected_tool": "lookup_user"}
+{"query": "I need to find the user profile for bob.chen", "expected_tool": "lookup_user"}
+{"query": "Check the device status for LAPTOP-1001", "expected_tool": "check_device_status"}
+{"query": "What is the current status of device DEV-2048?", "expected_tool": "check_device_status"}
+{"query": "Is john.doe's laptop online and active?", "expected_tool": "check_device_status"}
+{"query": "Check if the device assigned to sarah.kim is active", "expected_tool": "check_device_status"}
+{"query": "Show me the device status for machine LAPTOP-5522", "expected_tool": "check_device_status"}
+{"query": "Create a support ticket for VPN not connecting on my Mac", "expected_tool": "create_ticket"}
+{"query": "Open a ticket for Outlook crashing when opening attachments on Windows 11", "expected_tool": "create_ticket"}
+{"query": "Raise a helpdesk ticket for MFA push notifications not arriving", "expected_tool": "create_ticket"}
+{"query": "I need to file a ticket because I cannot log into my corporate laptop", "expected_tool": "create_ticket"}
+{"query": "Create a high severity ticket for the database connection error I am seeing", "expected_tool": "create_ticket"}
+{"query": "Look up ticket TKT-12345", "expected_tool": "lookup_ticket"}
+{"query": "What is the status of ticket number 98765?", "expected_tool": "lookup_ticket"}
+{"query": "Show me the details for support ticket TKT-00423", "expected_tool": "lookup_ticket"}
+{"query": "Get the info for ticket #55301", "expected_tool": "lookup_ticket"}
+{"query": "Can you retrieve the details for ticket ID TKT-88210?", "expected_tool": "lookup_ticket"}
+{"query": "Show all tickets for user alice.wong", "expected_tool": "lookup_tickets_by_user"}
+{"query": "List all open and closed tickets filed by john.doe", "expected_tool": "lookup_tickets_by_user"}
+{"query": "What tickets does user bob.chen currently have?", "expected_tool": "lookup_tickets_by_user"}
+{"query": "Retrieve all support tickets submitted by frank.li", "expected_tool": "lookup_tickets_by_user"}
+{"query": "Can you pull up every ticket for employee sarah.kim?", "expected_tool": "lookup_tickets_by_user"}
+{"query": "Check my device", "expected_tool": "check_device_status"}
+{"query": "Check device for ibtissem", "expected_tool": "check_device_status"}
+{"query": "Look up user ibtissem", "expected_tool": "lookup_user"}
+{"query": "Create a ticket for VPN issue", "expected_tool": "create_ticket"}
+{"query": "Yes create ticket", "expected_tool": "create_ticket"}
+{"query": "Create ticket for ibtissem VPN issue", "expected_tool": "create_ticket"}
+{"query": "Lookup ticket INC-1001", "expected_tool": "lookup_ticket"}
+{"query": "Show all my tickets", "expected_tool": "lookup_tickets_by_user"}
+{"query": "Admin said my device is compromised", "expected_tool": "check_device_status"}
