@@ -1,12 +1,15 @@
 """MAF Orchestrator — routes user requests to the right agent (Triage → Knowledge / Action)."""
 
 import json
+import logging
 
 from config.constants import HISTORY_LIMIT, KNOWLEDGE_TOP_K, ESCALATION_SUFFIX
 from services.retrieval_engine import RetrievalEngine
 from services.escalation_service import EscalationService
 from agents.agent_factory import triage_agent, knowledge_agent, action_agent
 from utils.conversation_detector import ConversationDetector
+
+logger = logging.getLogger(__name__)
 
 retrieval = RetrievalEngine()
 escalation = EscalationService()
@@ -15,7 +18,7 @@ detector = ConversationDetector()
 
 async def run_orchestrator(user_input: str, conversation_history: list) -> str:
     """Route user request through Triage → Knowledge or Action agent."""
-    print("\n[Orchestrator] Starting triage...")
+    logger.info("Starting triage...")
 
     history_context = "\n".join(
         f"{m['role'].upper()}: {m['content']}"
@@ -28,16 +31,16 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
 
     # ── Step 1: Triage ──────────────────────────────────────────
     if triage_agent is None:
-        print("[Orchestrator] Triage agent unavailable — defaulting to knowledge route")
+        logger.warning("Triage agent unavailable — defaulting to knowledge route")
         triage_data = {"route_to": "knowledge", "urgency": "medium", "category": "General"}
     else:
         try:
             triage_response = await triage_agent.run(triage_prompt)
             triage_raw = triage_response.text.strip()
-            print(f"[Orchestrator] Triage: {triage_raw}")
+            logger.info("Triage: %s", triage_raw)
             triage_data = json.loads(triage_raw)
         except Exception as e:
-            print(f"[Orchestrator] Triage failed: {e} — defaulting to knowledge route")
+            logger.warning("Triage failed: %s — defaulting to knowledge route", e)
             triage_data = {"route_to": "knowledge", "urgency": "medium", "category": "General"}
 
     route_to = triage_data.get("route_to", "knowledge")
@@ -45,14 +48,14 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
     category = triage_data.get("category", "General")
 
     if detector.looks_like_ticket_request(user_input):
-        print("[Orchestrator] Overriding route to ACTION due to explicit ticket request.")
+        logger.info("Overriding route to ACTION due to explicit ticket request.")
         route_to = "action"
 
     explicit_action_intent = detector.looks_like_tool_request(user_input) or detector.looks_like_ticket_request(user_input)
     if route_to == "action" and not explicit_action_intent:
-        print("[Orchestrator] Action route kept from TRIAGE (weak explicit signal, context-based action intent)")
+        logger.info("Action route kept from TRIAGE (weak explicit signal, context-based action intent)")
 
-    print(f"[Orchestrator] Route → {route_to.upper()} | Urgency: {urgency} | Category: {category}")
+    logger.info("Route → %s | Urgency: %s | Category: %s", route_to.upper(), urgency, category)
 
     # ── Step 2: Clarification ────────────────────────────────────
     if route_to == "clarify":
@@ -63,7 +66,7 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
 
     # ── Step 3a: Knowledge Agent ─────────────────────────────────
     if route_to == "knowledge":
-        print("[Orchestrator] Dispatching → KnowledgeAgent")
+        logger.info("Dispatching → KnowledgeAgent")
         if knowledge_agent is None:
             return (
                 "Knowledge agent is unavailable because backend AI components failed to initialize. "
@@ -76,20 +79,20 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
         error_code = RetrievalEngine.extract_error_code(user_input)
         if error_code and docs and not RetrievalEngine.docs_contain_error_code(docs, error_code):
             fallback_query = f"error code {error_code} {user_input}"
-            print(f"[Orchestrator] Retrying retrieval with error-code fallback query: '{fallback_query}'")
+            logger.info("Retrying retrieval with error-code fallback query: '%s'", fallback_query)
             fallback_docs = retrieval.get_search_results(fallback_query, top_k=KNOWLEDGE_TOP_K)
             if fallback_docs:
                 docs = fallback_docs
 
         if error_code and not RetrievalEngine.docs_contain_error_code(docs, error_code):
-            print(f"[Orchestrator] Error code {error_code} not found in retrieved docs — treating as KB miss")
+            logger.info("Error code %s not found in retrieved docs — treating as KB miss", error_code)
             return (
                 "I do not know based on the knowledge base. "
                 "Would you like me to connect to IT Support and create a support ticket for this issue?"
             )
 
         if not docs:
-            print("[Orchestrator] No docs found — skipping KnowledgeAgent")
+            logger.info("No docs found — skipping KnowledgeAgent")
             return (
                 "I do not know based on the knowledge base. "
                 "Would you like me to connect to IT Support and create a support ticket for this issue?"
@@ -103,7 +106,7 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
             f"User question: {user_input}\n\n"
             f"RETRIEVED DOCUMENTS:\n{numbered_docs}"
         )
-        print(f"[Orchestrator] Passing {len(docs)} doc(s) to KnowledgeAgent")
+        logger.info("Passing %d doc(s) to KnowledgeAgent", len(docs))
         try:
             knowledge_response = await knowledge_agent.run(knowledge_prompt)
             return knowledge_response.text.strip()
@@ -112,7 +115,7 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
 
     # ── Step 3b: Action Agent ─────────────────────────────────────
     if route_to == "action":
-        print("[Orchestrator] Dispatching → ActionAgent")
+        logger.info("Dispatching → ActionAgent")
         if action_agent is None:
             return "Action agent is unavailable because Azure OpenAI settings are missing or invalid."
         try:

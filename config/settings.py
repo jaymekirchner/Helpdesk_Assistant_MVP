@@ -1,9 +1,12 @@
 """Application settings: environment variables, client initialization, startup checks."""
 
+import logging
 import os
 import sys
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 from openai import AzureOpenAI
@@ -15,19 +18,13 @@ except Exception:
         def _decorator(func):
             return func
         return _decorator
-    print(
-        "[Startup Warning] agent_framework.tool unavailable; using no-op tool decorator.",
-        file=sys.stderr,
-    )
+    logger.warning("agent_framework.tool unavailable; using no-op tool decorator.")
 
 try:
     from agent_framework.openai import OpenAIChatCompletionClient
 except Exception as e:
     OpenAIChatCompletionClient = None
-    print(
-        f"[Startup Warning] agent_framework.openai unavailable: {e}",
-        file=sys.stderr,
-    )
+    logger.warning("agent_framework.openai unavailable: %s", e)
 
 load_dotenv()
 
@@ -61,10 +58,9 @@ _MISSING_STARTUP_VARS = [
 ]
 
 if _MISSING_STARTUP_VARS:
-    print(
-        "[Startup Warning] Missing environment variables: "
-        + ", ".join(_MISSING_STARTUP_VARS)
-        + ". App will start in degraded mode."
+    logger.warning(
+        "Missing environment variables: %s. App will start in degraded mode.",
+        ", ".join(_MISSING_STARTUP_VARS),
     )
 
 # ── Client singletons ───────────────────────────────────────────────────────

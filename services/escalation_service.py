@@ -1,9 +1,12 @@
 """Escalation detection — keyword + LLM-based uncertainty check."""
 
 import json
+import logging
 
 from config.settings import openai_client, OPENAI_DEPLOYMENT
 from config.constants import ESCALATION_TRIGGERS, ESCALATION_SUFFIX
+
+logger = logging.getLogger(__name__)
 
 
 class EscalationService:
@@ -17,7 +20,7 @@ class EscalationService:
 
         keyword_hit = any(trigger in answer_lower for trigger in ESCALATION_TRIGGERS)
         if keyword_hit:
-            print("[DEBUG] Escalation triggered by keyword match")
+            logger.debug("Escalation triggered by keyword match")
             return answer + ESCALATION_SUFFIX
 
         system_message = (
@@ -50,10 +53,10 @@ class EscalationService:
             parsed = json.loads(raw)
 
             if parsed.get("uncertain", False):
-                print("[DEBUG] Escalation triggered by LLM confidence check")
+                logger.debug("Escalation triggered by LLM confidence check")
                 return answer + ESCALATION_SUFFIX
         except Exception as e:
-            print(f"[DEBUG] Escalation LLM check failed: {e} — skipping")
+            logger.debug("Escalation LLM check failed: %s — skipping", e)
 
         return answer
 

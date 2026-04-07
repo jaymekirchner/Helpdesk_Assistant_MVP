@@ -1,10 +1,13 @@
 """Azure AI Search retrieval and query enrichment."""
 
+import logging
 import re
 
 from config.settings import openai_client, search_client, OPENAI_DEPLOYMENT
 from config.constants import HISTORY_LIMIT
 from prompts.orchestrator import RETRIEVAL_QUERY_BUILDER_SYSTEM
+
+logger = logging.getLogger(__name__)
 
 
 class RetrievalEngine:
@@ -18,7 +21,7 @@ class RetrievalEngine:
 
     def build_retrieval_query(self, user_input: str, conversation_history: list) -> str:
         if not conversation_history:
-            print(f"[DEBUG] No history — using raw query: {user_input}")
+            logger.debug("No history — using raw query: %s", user_input)
             return user_input
 
         messages = [
@@ -35,10 +38,10 @@ class RetrievalEngine:
                 max_tokens=50,
             )
             enriched_query = response.choices[0].message.content.strip()
-            print(f"[DEBUG] Enriched retrieval query: '{enriched_query}'")
+            logger.debug("Enriched retrieval query: '%s'", enriched_query)
             return enriched_query
         except Exception as e:
-            print(f"[DEBUG] Query enrichment failed: {e} — falling back to raw input")
+            logger.debug("Query enrichment failed: %s — falling back to raw input", e)
             return user_input
 
     # ── Document retrieval ───────────────────────────────────────────────────
@@ -56,7 +59,7 @@ class RetrievalEngine:
                     docs.append(str(doc))
             return docs
         except Exception as e:
-            print(f"Error querying Azure Search: {e}")
+            logger.error("Error querying Azure Search: %s", e)
             return []
 
     # ── Error-code helpers ───────────────────────────────────────────────────
