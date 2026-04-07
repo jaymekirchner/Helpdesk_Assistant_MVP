@@ -15,3 +15,7 @@ CREATE TABLE demo.users (
 	CONSTRAINT users_device_id_key UNIQUE (device_id),
 	CONSTRAINT users_pkey PRIMARY KEY (user_id)
 );
+CREATE INDEX idx_deviceid ON demo.users USING btree (device_id);
+CREATE INDEX idx_fullname ON demo.users USING btree (first_name, last_name);
+CREATE INDEX idx_userid ON demo.users USING btree (user_id);
+CREATE INDEX idx_username ON demo.users USING btree (username);
