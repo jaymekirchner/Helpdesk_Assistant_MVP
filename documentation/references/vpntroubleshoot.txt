@@ -1,0 +1,39 @@
+Overview:
+Defines rules and requirements for remote access to corporate resources.
+Access Requirements:
+- Active employment status
+- MFA enrollment mandatory
+- Compliant device (MDM-managed)
+- Password not older than 90 days
+Usage Restrictions:
+- VPN required for ERP, HRIS, and financial systems
+- VPN sessions auto-disconnect after 12 hours inactivity
+- Simultaneous sessions: maximum 2
+Security Controls:
+- DNS filtering applied to all VPN traffic
+- Malware scanning on all inbound/outbound connections
+- Certificate-based device trust verification
+Violation Handling:
+Repeated failures trigger IAM review and temporary access lock.
+
+VPN Network Outage — Incident Response Procedure
+Trigger:
+- ServiceNow Major Incident (MI) triggered for VPN outage
+- Multiple reports from monitoring tools or employees
+Immediate Actions:
+1. Validate outage using:
+   - Ping vpn.company.internal
+   - Check firewall cluster health
+   - Review error rates in GlobalProtect logs
+2. Notify stakeholders:
+   - IT Leadership
+   - Security Team
+   - NOC On-call
+3. Switch traffic to secondary VPN gateway if available.
+4. Post updates every 15 minutes during outage.
+Recovery:
+- Run connectivity tests on all regions.
+- Validate MFA integration working.
+- Clear any stale authentication sessions.
+Post-Incident:
+- Publish RCA within 72 hours.

@@ -1,0 +1,16 @@
+Indicators of Account Lockout:
+- User receives “Account locked” message.
+- Login attempts fail immediately.
+- MFA not triggered.
+Immediate Actions:
+1. Confirm lockout in ADUC.
+2. Unlock account manually.
+3. Reset password if repeated failures occur.
+4. Identify the source of lockouts:
+   - Windows Credential Manager
+   - Outlook mobile
+   - VPN auto-login
+   - Background services running under the user account
+5. Disable suspicious devices in Azure AD → 'Sign Out Everywhere'.
+Security Escalation:
+If multiple lockouts occur within minutes, treat as potential compromise and notify the Security Operations Center (SOC).
