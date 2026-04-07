@@ -1,0 +1,27 @@
+Supported MFA Methods:
+- Microsoft Authenticator App
+- SMS OTP
+- Email OTP
+- Hardware Token (security key)
+Setup Instructions:
+1. Go to https://mfa.company.internal
+2. Sign in with corporate credentials.
+3. Select 'Add Method':
+   - Recommended: Authenticator App → Scan QR code.
+4. Approve test MFA prompt.
+Common MFA Issues:
+Issue: Not receiving MFA prompts
+- Check device time accuracy.
+- Ensure push notifications are enabled (iOS/Android).
+- Re-register the Authenticator App.
+Issue: MFA loop (prompt repeats)
+- Usually caused by stale credentials.
+- Clear cached tokens:
+   Windows: run 'dsregcmd /leave'
+   macOS: Sign out of all corporate accounts.
+Issue: “You can’t use this method”
+- Some roles (IT, Security) require hardware token MFA.
+Recovery:
+If user loses access to all MFA methods:
+- Verify identity via helpdesk (two approved methods).
+- Reset MFA methods in Azure AD → “Require re-register MFA”.

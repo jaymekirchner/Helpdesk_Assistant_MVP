@@ -1,0 +1,16 @@
+Common Error Codes:
+502 — Authentication Failed
+- Incorrect password or stale credentials.
+- Reset password in https://passwordreset.company.internal.
+503 — Portal Unreachable
+- DNS failure or no internet connection.
+- Flush DNS and retry.
+509 — Missing Client Certificate
+- Device not registered or certificate expired.
+- Re-enroll device using the MDM portal.
+521 — Connection Timeout
+- Firewall or proxy blocking traffic.
+- Connect from a different network.
+532 — Tunnel Failure
+- Split tunnel routing conflict.
+- Restart system and disable other VPN applications.

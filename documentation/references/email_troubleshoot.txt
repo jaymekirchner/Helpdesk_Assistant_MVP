@@ -1,0 +1,18 @@
+Issue: "Outlook cannot connect to server"
+- Check network connectivity.
+- Restart Outlook.
+- Reset Outlook profile via Control Panel → Mail → Profiles.
+- Validate modern authentication is enabled.
+- Confirm no stale password stored in Credential Manager.
+- Check service health on https://status.office.com.
+Issue: Email stuck in Outbox
+- Switch Outlook to Online Mode.
+- Ensure the mailbox is not over quota.
+- Disable large attachment uploads via VPN.
+Issue: Missing Emails
+- Verify filters & rules.
+- Check Junk and Clutter folders.
+- Confirm retention policy has not auto-archived items.
+Issue: Cannot send attachments
+- Max attachment size: 25 MB.
+- For larger files, use OneDrive → Share Link.

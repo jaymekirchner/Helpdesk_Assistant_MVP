@@ -1,0 +1,30 @@
+Overview:
+This runbook covers common failure scenarios and resolution steps for GlobalProtect VPN on Windows, macOS, and mobile devices.
+Symptoms:
+- “Cannot connect to GlobalProtect portal”
+- “Connection failed”
+- Frequent disconnects
+- Stuck at “Authenticating”
+Standard Troubleshooting Steps:
+1. Restart the GlobalProtect service:
+   - Windows: Services.msc → GlobalProtect → Restart
+   - macOS: sudo launchctl kickstart -k system/com.paloaltonetworks.gp
+2. Re-authenticate using corporate credentials + MFA.
+3. Flush DNS:
+   - Windows: ipconfig /flushdns
+   - macOS: sudo dscacheutil -flushcache
+4. Clear saved credentials from:
+   - Windows Credential Manager
+   - macOS Keychain
+5. Disconnect from all other VPN clients (Cisco AnyConnect, FortiClient).
+6. Check network:
+   - Ensure Wi-Fi has internet access
+   - Disable captive portals or hotel login pages
+7. Verify GlobalProtect portal is reachable:
+   - https://vpn.company.internal
+Escalation:
+If connection still fails, collect:
+- PanGPS.log
+- PanGPA.log
+- System event logs
+Then escalate to Network Engineering.

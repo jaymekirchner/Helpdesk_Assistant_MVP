@@ -1,0 +1,34 @@
+Overview:
+This document outlines email security requirements for all employees.
+Security Controls:
+- MFA required for all email access.
+- External email tagging applied to all inbound messages.
+- Advanced Threat Protection (ATP) scans attachments & links.
+- DKIM, DMARC, SPF enforced for outbound domains.
+Phishing Handling:
+1. If user reports phishing:
+   - Send email sample to phishing@company.internal.
+   - Security team analyzes via ATP.
+2. Educate user on safe handling.
+3. If compromised inbox detected:
+   - Force password reset.
+   - Revoke active sessions.
+   - Run mailbox auditing script.
+Encryption:
+Confidential data must be sent using:
+- “Encrypt Message” in Outlook
+- Or M365 Message Encryption (OME)
+
+Retention:
+- Standard retention: 7 years for all employee mailboxes.
+- Deleted items retained 30 days unless purged.
+Archiving:
+- Online Archive mailbox enabled after 45 GB usage.
+- Archive mailbox capacity: unlimited.
+Legal Hold:
+1. Only Legal and Compliance may request holds.
+2. Place mailbox on litigation hold via Exchange Online.
+3. Hold prevents deletion or modification of emails.
+4. Duration determined case-by-case.
+Auto-Archive Settings:
+- Moves emails older than 2 years to Archive.
