@@ -2,10 +2,13 @@
 
 import asyncio
 import json
+import logging
 import time
 import concurrent.futures
 
 from config.settings import MCP_SERVER_URL, MCP_MAX_RETRIES, MCP_RETRY_BACKOFF
+
+logger = logging.getLogger(__name__)
 
 
 class MCPClient:
@@ -31,10 +34,10 @@ class MCPClient:
                 last_exc = e
                 if attempt < MCP_MAX_RETRIES - 1:
                     delay = MCP_RETRY_BACKOFF[attempt]
-                    print(f"[MCP] Tool '{tool_name}' attempt {attempt + 1} failed: {e} — retrying in {delay}s")
+                    logger.warning("Tool '%s' attempt %d failed: %s — retrying in %ss", tool_name, attempt + 1, e, delay)
                     time.sleep(delay)
                 else:
-                    print(f"[MCP] Tool '{tool_name}' failed after {MCP_MAX_RETRIES} attempts: {e}")
+                    logger.error("Tool '%s' failed after %d attempts: %s", tool_name, MCP_MAX_RETRIES, e)
         raise last_exc
 
     @staticmethod

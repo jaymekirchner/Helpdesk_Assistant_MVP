@@ -4,7 +4,12 @@ import asyncio
 
 from agents.controller import handle_user_message
 from services.mcp_client import mcp_client, MCPClient
+import logging
 
+logging.basicConfig(
+    level=logging.DEBUG,       # or logging.INFO to hide DEBUG-level messages
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
 
 # Backward-compatible aliases for app_ui.py imports
 _call_mcp_tool = mcp_client.call_tool

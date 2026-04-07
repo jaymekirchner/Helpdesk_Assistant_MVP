@@ -62,6 +62,14 @@ TOOL_REQUEST_SIGNALS = [
     "ticket details",
     "check ticket",
     "escalate",
+    "user",
+    "username",
+    "name"
+    "get user",
+    "get username",
+    "get tickets",
+    "ticket"
+    "device"
     # "check my device",
     # "check device for",
 ]
@@ -80,6 +88,8 @@ TICKET_LOOKUP_SIGNALS = [
     "find tickets",
     "search ticket",
     "search tickets",
+    "get ticket",
+    "get tickets"
     # "show all my tickets",
     # "show tickets",
     # "show all tickets",
@@ -95,6 +105,13 @@ TICKET_REQUEST_SIGNALS = [
     "escalate this",
     "escalate issue",
     "escalate",
+    "ticket",
+    "need ticket",
+    "need to open ticket",
+    "want to open ticket",
+    "want to create ticket",
+    "want to raise ticket",
+    "want to raise a ticket"
 ]
 
 TICKET_CONFIRMATION_SIGNALS = [
@@ -110,6 +127,9 @@ TICKET_CONFIRMATION_SIGNALS = [
     "sure",
     "okay",
     "ok",
+    "yeah",
+    "yep",
+    "ya",
     "yes thanks",
     "yes thank you",
     "please create a ticket",
