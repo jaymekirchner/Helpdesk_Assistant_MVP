@@ -1,9 +1,12 @@
 """Agent Controller — top-level message handler with conversation-state machine."""
 
+import logging
 import re
 import json
 
 from config.settings import openai_client, OPENAI_DEPLOYMENT
+
+logger = logging.getLogger(__name__)
 from config.constants import (
     HISTORY_LIMIT,
     ESCALATION_SUFFIX,
@@ -75,7 +78,7 @@ def summarize_long_input(user_input: str) -> str:
         )
         return resp.choices[0].message.content.strip()
     except Exception as exc:
-        print(f"[summarize_long_input] LLM call failed: {exc} — truncating instead")
+        logger.warning("summarize_long_input LLM call failed: %s — truncating instead", exc)
         return user_input[:LONG_INPUT_THRESHOLD]
 
 
@@ -114,7 +117,7 @@ def extract_ticket_context(conversation_history: list) -> dict:
             max_tokens=200,
         )
         raw = response.choices[0].message.content.strip()
-        print(f"[DEBUG] Extracted ticket context: {raw}")
+        logger.debug("Extracted ticket context: %s", raw)
         parsed = json.loads(raw)
         return {
             "issue": parsed.get("issue", "Unresolved IT issue"),
@@ -127,7 +130,7 @@ def extract_ticket_context(conversation_history: list) -> dict:
             "device_id": parsed.get("device_id", ""),
         }
     except Exception as e:
-        print(f"[DEBUG] Ticket context extraction failed: {e} — using defaults")
+        logger.debug("Ticket context extraction failed: %s — using defaults", e)
         return {
             "issue": "Unresolved IT issue from conversation",
             "category": "General",
@@ -143,7 +146,7 @@ def extract_ticket_context(conversation_history: list) -> dict:
 # ── Main handler ─────────────────────────────────────────────────────────────
 
 async def handle_user_message(user_input: str, conversation_history: list):
-    print("\n[Agent Controller] Evaluating message...")
+    logger.info("Evaluating message...")
 
     # Pre-check: repeated input
     if conversation_history:
@@ -152,7 +155,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             None,
         )
         if last_user_msg and last_user_msg.strip().lower() == user_input.strip().lower():
-            print("[Agent Controller] Repeated input detected — sending clarification prompt.")
+            logger.info("Repeated input detected — sending clarification prompt.")
             return (
                 "It looks like you sent the same message again. "
                 "Are you still waiting for something, or would you like to rephrase your request?"
@@ -170,7 +173,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
                 effective_input = user_input
         else:
             effective_input = user_input.strip()
-        print(f"[Agent Controller] Long-input confirmation received — routing with: {effective_input[:80]}...")
+        logger.info("Long-input confirmation received — routing with: %s...", effective_input[:80])
         response = await run_orchestrator(effective_input, conversation_history)
         if escalation.should_run_escalation_check(response):
             final_response = escalation.check_escalation(response)
@@ -180,7 +183,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
 
     # Pre-check: long input — summarize and ask the user to verify
     if len(user_input) > LONG_INPUT_THRESHOLD and openai_client:
-        print(f"[Agent Controller] Long input ({len(user_input)} chars) — summarizing before routing.")
+        logger.info("Long input (%d chars) — summarizing before routing.", len(user_input))
         summary = summarize_long_input(user_input)
         return (
             f"Here is my summary:\n\n{summary}\n\n"
@@ -198,7 +201,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         ctx = extract_ticket_context(conversation_history)
         ctx["additional_cc_emails"] = [email_match.group(0)]
         tool_prompt = build_ticket_prompt(ctx)
-        print(f"[DEBUG] Ticket prompt with additional CC: {tool_prompt}")
+        logger.debug("Ticket prompt with additional CC: %s", tool_prompt)
         action_response = await action_agent.run(tool_prompt)
         return action_response.text, True
 
@@ -212,7 +215,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
         ctx = extract_ticket_context(conversation_history)
         tool_prompt = build_ticket_prompt(ctx)
-        print(f"[DEBUG] Ticket prompt (no additional CC): {tool_prompt}")
+        logger.debug("Ticket prompt (no additional CC): %s", tool_prompt)
         action_response = await action_agent.run(tool_prompt)
         return action_response.text, True
 
@@ -221,7 +224,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         email_match = re.search(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}\b", user_input)
         if not email_match:
             return "That doesn't look like a valid email address. Please try again.", True
-        print(f"[DEBUG] KB escalation (email) — prompting for CC email")
+        logger.debug("KB escalation (email) — prompting for CC email")
         return CC_EMAIL_PROMPT, True
 
     # Pre-check: KB ticket flow — username value received → ask about CC
@@ -229,7 +232,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         username = user_input.strip()
         if not username:
             return KB_TICKET_USERNAME_INPUT_PROMPT, True
-        print(f"[DEBUG] KB escalation (username) — prompting for CC email")
+        logger.debug("KB escalation (username) — prompting for CC email")
         return CC_EMAIL_PROMPT, True
 
     # Pre-check: KB ticket flow — last name received (name-based identity) → ask about CC
@@ -240,12 +243,12 @@ async def handle_user_message(user_input: str, conversation_history: list):
         first_name = detector.get_kb_ticket_first_name_from_history(conversation_history)
         if not first_name:
             return "I couldn't retrieve the first name. Please start over.", True
-        print(f"[DEBUG] KB escalation (name) — prompting for CC email")
+        logger.debug("KB escalation (name) — prompting for CC email")
         return CC_EMAIL_PROMPT, True
 
     # Pre-check: KB ticket flow — first name received, ask for last name
     if conversation_history and detector.last_assistant_asked_for_kb_ticket_first_name(conversation_history):
-        print("[Agent Controller] KB ticket first name received — asking for last name")
+        logger.info("KB ticket first name received — asking for last name")
         return KB_TICKET_LAST_NAME_PROMPT, True
 
     # Pre-check: KB ticket flow — method choice (username vs email vs name)
@@ -266,14 +269,14 @@ async def handle_user_message(user_input: str, conversation_history: list):
         and detector.last_assistant_offered_escalation(conversation_history)
     )
     if is_confirmation:
-        print("[Agent Controller] Decision → TICKET CONFIRMATION → ActionAgent")
+        logger.info("Decision → TICKET CONFIRMATION → ActionAgent")
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
         ctx = extract_ticket_context(conversation_history)
         if ctx["user"] == "unknown":
-            print("[Agent Controller] User identity unknown — requesting identity method before ticket creation")
+            logger.info("User identity unknown — requesting identity method before ticket creation")
             return KB_TICKET_IDENTITY_METHOD_PROMPT, True
-        print("[Agent Controller] Ticket confirmation — prompting for CC email")
+        logger.info("Ticket confirmation — prompting for CC email")
         return CC_EMAIL_PROMPT, True
 
     # Identity for lookup
@@ -301,7 +304,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
     if conversation_history and detector.last_assistant_requested_name_fields(conversation_history):
         first_name, last_name = detector.extract_first_last_name(user_input)
         if first_name and last_name:
-            print("[Agent Controller] Name fields detected in user reply — continuing action flow.")
+            logger.info("Name fields detected in user reply — continuing action flow.")
             return IDENTITY_LOOKUP_PROMPT, True
 
     # Ticket field request from assistant
@@ -323,7 +326,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
                 f"- impacted_system: {impacted_system}\n"
                 "Call create_ticket now with these exact values."
             )
-            print(f"[Agent Controller] Auto-creating ticket from user reply: {ticket_prompt}")
+            logger.info("Auto-creating ticket from user reply: %s", ticket_prompt)
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
             action_response = await action_agent.run(ticket_prompt)
@@ -340,7 +343,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         user_block = detector.get_user_by_match_number(conversation_history, match_num)
         if not user_block:
             return LOOKUP_DISAMBIGUATE_PROMPT, True
-        print(f"[Agent Controller] Decision → DISAMBIGUATE by match number: {match_num}")
+        logger.info("Decision → DISAMBIGUATE by match number: %d", match_num)
         return f"User found:\n{user_block}\n\n{LOOKUP_NEXT_ACTION_PROMPT}", True
 
     # Next action after successful lookup
@@ -354,12 +357,12 @@ async def handle_user_message(user_input: str, conversation_history: list):
             # Ask for ticket number
             return TICKET_LOOKUP_NUMBER_PROMPT, True
         elif "device" in choice:
-            print(f"[Agent Controller] Decision → CHECK DEVICE for username: {username}")
+            logger.info("Decision → CHECK DEVICE for username: %s", username)
             device_prompt = f"Use check_device_status with '{username}'. Display the full device details."
             action_response = await action_agent.run(device_prompt)
             return action_response.text, True
         elif "ticket" in choice:
-            print(f"[Agent Controller] Decision → CREATE TICKET for username: {username}")
+            logger.info("Decision → CREATE TICKET for username: %s", username)
             history_context = "\n".join(
                 f"{m['role'].upper()}: {m['content']}"
                 for m in conversation_history[-HISTORY_LIMIT:]
@@ -382,7 +385,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             return "I couldn't retrieve the first name. Please start the lookup again.", True
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        print(f"[Agent Controller] Decision → LOOKUP by name: {first_name} {last_name}")
+        logger.info("Decision → LOOKUP by name: %s %s", first_name, last_name)
         lookup_prompt = (
             f"Use lookup_user with first_name='{first_name}' and last_name='{last_name}'. "
             "Display all the user details returned."
@@ -396,7 +399,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
 
     # First name received — ask for last name
     if conversation_history and detector.last_assistant_asked_for_lookup_first_name(conversation_history):
-        print("[Agent Controller] First name received — asking for last name")
+        logger.info("First name received — asking for last name")
         return LOOKUP_LAST_NAME_PROMPT, True
 
     # Username received — username-based lookup
@@ -404,7 +407,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         username = user_input.strip()
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        print(f"[Agent Controller] Decision → LOOKUP by username: {username}")
+        logger.info("Decision → LOOKUP by username: %s", username)
         lookup_prompt = (
             f"Use lookup_user with username='{username}'. "
             "Display all the user details returned."
@@ -433,7 +436,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             return TICKET_LOOKUP_NUMBER_PROMPT, True
         if not action_agent:
             return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        print(f"[Agent Controller] Decision → LOOKUP TICKET: {ticket_id}")
+        logger.info("Decision → LOOKUP TICKET: %s", ticket_id)
         ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
         action_response = await action_agent.run(ticket_prompt)
         return action_response.text, True
@@ -445,7 +448,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         if first_name and last_name:
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (name): {first_name} {last_name}")
+            logger.info("Decision → LOOKUP TICKETS BY USER (name): %s %s", first_name, last_name)
             ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
@@ -453,7 +456,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
 
     # Ticket-by-user first name received
     if conversation_history and detector.last_assistant_asked_for_ticket_lookup_first_name(conversation_history):
-        print("[Agent Controller] Decision → TICKET LOOKUP BY NAME → first name received, prompting for last name")
+        logger.info("Decision → TICKET LOOKUP BY NAME → first name received, prompting for last name")
         return TICKET_LOOKUP_USER_LAST_NAME_PROMPT, True
 
     # Ticket-by-username received
@@ -463,7 +466,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             lookup_username = detector.normalize_lookup_username(identity_value, identity_kind)
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (username): {lookup_username}")
+            logger.info("Decision → LOOKUP TICKETS BY USER (username): %s", lookup_username)
             ticket_prompt = f"Use lookup_tickets_by_user with username='{lookup_username}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
@@ -487,7 +490,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         if ticket_id:
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKET (inline): {ticket_id}")
+            logger.info("Decision → LOOKUP TICKET (inline): %s", ticket_id)
             ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
@@ -495,7 +498,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         if target_kind == "username":
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (inline username): {target_value}")
+            logger.info("Decision → LOOKUP TICKETS BY USER (inline username): %s", target_value)
             ticket_prompt = f"Use lookup_tickets_by_user with username='{target_value}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
@@ -503,30 +506,30 @@ async def handle_user_message(user_input: str, conversation_history: list):
             first_name, last_name = target_value
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-            print(f"[Agent Controller] Decision → LOOKUP TICKETS BY USER (inline name): {first_name} {last_name}")
+            logger.info("Decision → LOOKUP TICKETS BY USER (inline name): %s %s", first_name, last_name)
             ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
             return action_response.text, True
         by_method = detector.extract_lookup_by_keyword(user_input)
         if by_method == "username":
-            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for username")
+            logger.info("Decision → TICKET LOOKUP BY → prompting for username")
             return TICKET_LOOKUP_USERNAME_PROMPT, True
         if by_method == "name":
-            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for first/last name")
+            logger.info("Decision → TICKET LOOKUP BY → prompting for first/last name")
             return TICKET_LOOKUP_USER_PROMPT, True
         if by_method == "number":
-            print("[Agent Controller] Decision → TICKET LOOKUP BY → prompting for ticket number")
+            logger.info("Decision → TICKET LOOKUP BY → prompting for ticket number")
             return TICKET_LOOKUP_NUMBER_PROMPT, True
         return TICKET_LOOKUP_METHOD_PROMPT, True
 
     # Direct lookup request
     if detector.looks_like_direct_lookup_request(user_input):
-        print("[Agent Controller] Decision → DIRECT LOOKUP → prompting for method")
+        logger.info("Decision → DIRECT LOOKUP → prompting for method")
         return LOOKUP_METHOD_PROMPT, True
 
     # Failed troubleshooting steps
     if detector.user_reports_failed_steps(user_input, conversation_history):
-        print("[Agent Controller] Decision → FOLLOW-UP FAILURE → OFFER ESCALATION")
+        logger.info("Decision → FOLLOW-UP FAILURE → OFFER ESCALATION")
         return (
             "Thanks for trying those steps."
             + "\n\nWould you like me to create a support ticket for this issue?"
@@ -536,7 +539,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
     # Duplicate ticket guard
     if detector.last_assistant_warned_about_duplicate_ticket(conversation_history):
         if detector.looks_like_ticket_confirmation(user_input):
-            print("[Agent Controller] Decision → DUPLICATE TICKET CONFIRMED → prompting for new issue")
+            logger.info("Decision → DUPLICATE TICKET CONFIRMED → prompting for new issue")
             return "Please describe the new issue you'd like to open a ticket for.", True
         if user_input.strip().lower() in ("no", "no thanks", "cancel", "never mind", "nevermind", "nope"):
             return "Understood. No additional ticket will be created.", True
@@ -544,7 +547,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
     if detector.looks_like_ticket_request(user_input):
         existing_ticket_id = detector.ticket_already_created_in_session(conversation_history)
         if existing_ticket_id:
-            print(f"[Agent Controller] Decision → DUPLICATE TICKET GUARD (existing: {existing_ticket_id})")
+            logger.info("Decision → DUPLICATE TICKET GUARD (existing: %s)", existing_ticket_id)
             return (
                 f"A ticket was already opened in this conversation (Ticket ID: {existing_ticket_id}). "
                 "Would you like to open an additional ticket for a different issue? "
