@@ -58,6 +58,7 @@ class EscalationService:
         except Exception as e:
             logger.debug("Escalation LLM check failed: %s — skipping", e)
 
+        logger.info("No escalation needed for response (%d chars)", len(answer))
         return answer
 
     @staticmethod

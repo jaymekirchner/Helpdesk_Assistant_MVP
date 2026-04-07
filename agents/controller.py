@@ -147,6 +147,7 @@ def extract_ticket_context(conversation_history: list) -> dict:
 
 async def handle_user_message(user_input: str, conversation_history: list):
     logger.info("Evaluating message...")
+    logger.info("Conversation history: %d turn(s)", len(conversation_history))
 
     # Pre-check: repeated input
     if conversation_history:
@@ -201,8 +202,9 @@ async def handle_user_message(user_input: str, conversation_history: list):
         ctx = extract_ticket_context(conversation_history)
         ctx["additional_cc_emails"] = [email_match.group(0)]
         tool_prompt = build_ticket_prompt(ctx)
-        logger.debug("Ticket prompt with additional CC: %s", tool_prompt)
+        logger.info("Ticket prompt with additional CC: %s", tool_prompt)
         action_response = await action_agent.run(tool_prompt)
+        logger.info("ActionAgent response (CC ticket): %s", action_response.text[:500])
         return action_response.text, True
 
     # Pre-check: CC email yes/no response
@@ -217,6 +219,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         tool_prompt = build_ticket_prompt(ctx)
         logger.debug("Ticket prompt (no additional CC): %s", tool_prompt)
         action_response = await action_agent.run(tool_prompt)
+        logger.info("ActionAgent response (no-CC ticket): %s", action_response.text[:500])
         return action_response.text, True
 
     # Pre-check: KB ticket flow — email value received → ask about CC
@@ -298,6 +301,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             "Then continue the ticket workflow using conversation context and create the ticket when ready."
         )
         action_response = await action_agent.run(followup_prompt)
+        logger.info("ActionAgent response (identity lookup): %s", action_response.text[:500])
         return action_response.text, True
 
     # Name fields provided
@@ -330,6 +334,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             if not action_agent:
                 return "Action agent is unavailable because Azure OpenAI settings are missing.", True
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (auto-ticket): %s", action_response.text[:500])
             return action_response.text, True
 
     # ── Lookup method selection flow ─────────────────────────────────────────
@@ -360,6 +365,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → CHECK DEVICE for username: %s", username)
             device_prompt = f"Use check_device_status with '{username}'. Display the full device details."
             action_response = await action_agent.run(device_prompt)
+            logger.info("ActionAgent response (device check): %s", action_response.text[:500])
             return action_response.text, True
         elif "ticket" in choice:
             logger.info("Decision → CREATE TICKET for username: %s", username)
@@ -373,6 +379,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
                 "Collect any missing ticket details from the conversation history and create the ticket."
             )
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (create ticket): %s", action_response.text[:500])
             return action_response.text, True
         else:
             return LOOKUP_NEXT_ACTION_PROMPT, True
@@ -392,6 +399,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         )
         action_response = await action_agent.run(lookup_prompt)
         response_text = action_response.text
+        logger.info("ActionAgent response (name lookup): %s", response_text[:500])
         error_indicators = ("error", "failed", "not found", "no user", "please provide")
         if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
@@ -414,6 +422,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         )
         action_response = await action_agent.run(lookup_prompt)
         response_text = action_response.text
+        logger.info("ActionAgent response (username lookup): %s", response_text[:500])
         error_indicators = ("error", "failed", "not found", "no user", "please provide")
         if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
@@ -439,6 +448,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
         logger.info("Decision → LOOKUP TICKET: %s", ticket_id)
         ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
         action_response = await action_agent.run(ticket_prompt)
+        logger.info("ActionAgent response (ticket lookup): %s", action_response.text[:500])
         return action_response.text, True
 
     # Ticket-by-user last name received
@@ -451,6 +461,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → LOOKUP TICKETS BY USER (name): %s %s", first_name, last_name)
             ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (tickets-by-name): %s", action_response.text[:500])
             return action_response.text, True
         return TICKET_LOOKUP_USER_LAST_NAME_PROMPT, True
 
@@ -469,6 +480,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → LOOKUP TICKETS BY USER (username): %s", lookup_username)
             ticket_prompt = f"Use lookup_tickets_by_user with username='{lookup_username}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (tickets-by-username): %s", action_response.text[:500])
             return action_response.text, True
         return TICKET_LOOKUP_USERNAME_PROMPT, True
 
@@ -493,6 +505,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → LOOKUP TICKET (inline): %s", ticket_id)
             ticket_prompt = f"Use lookup_ticket with ticket_id='{ticket_id}'. Display all the ticket details returned."
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (inline ticket): %s", action_response.text[:500])
             return action_response.text, True
         target_value, target_kind = detector.extract_ticket_lookup_target(user_input)
         if target_kind == "username":
@@ -501,6 +514,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → LOOKUP TICKETS BY USER (inline username): %s", target_value)
             ticket_prompt = f"Use lookup_tickets_by_user with username='{target_value}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (inline tickets-by-username): %s", action_response.text[:500])
             return action_response.text, True
         if target_kind == "name":
             first_name, last_name = target_value
@@ -509,6 +523,7 @@ async def handle_user_message(user_input: str, conversation_history: list):
             logger.info("Decision → LOOKUP TICKETS BY USER (inline name): %s %s", first_name, last_name)
             ticket_prompt = f"Use lookup_tickets_by_user with first_name='{first_name}' and last_name='{last_name}'. Display all the tickets returned."
             action_response = await action_agent.run(ticket_prompt)
+            logger.info("ActionAgent response (inline tickets-by-name): %s", action_response.text[:500])
             return action_response.text, True
         by_method = detector.extract_lookup_by_keyword(user_input)
         if by_method == "username":
