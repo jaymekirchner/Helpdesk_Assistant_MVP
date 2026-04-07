@@ -189,8 +189,8 @@ def initialize_session_state():
         st.session_state.last_input = ""
     if 'pending_input' not in st.session_state:
         st.session_state.pending_input = ""
-    if 'health_status' not in st.session_state:
-        st.session_state.health_status = _run_health_check()
+    # if 'health_status' not in st.session_state:
+    #     st.session_state.health_status = _run_health_check()
 
 
 def add_message(role, content):
@@ -309,43 +309,43 @@ def main():
         st.session_state.typing = False
         st.rerun()
 
-    # Sidebar
-    with st.sidebar:
-        st.markdown("""<div class="sidebar-info">
-            <h3 style="margin:0;">🛠️ IT Helpdesk Assistant<br>Health Check</h3>
-        </div>""", unsafe_allow_html=True)
+    # # Sidebar
+    # with st.sidebar:
+    #     st.markdown("""<div class="sidebar-info">
+    #         <h3 style="margin:0;">🛠️ IT Helpdesk Assistant<br>Health Check</h3>
+    #     </div>""", unsafe_allow_html=True)
 
-        # ── MCP Server Status ──────────────────────────────
-        health = st.session_state.get("health_status")
-        if health is None:
-            st.error("⛔ MCP Server unreachable — tool calls will fail.")
-        else:
-            data = health.get("data") or {}
-            checks = data.get("checks", {})
-            if health.get("success"):
-                st.success("✅ Server ready")
-            else:
-                st.warning("⚠️ Server degraded")
-                error_details = health.get("error")
-                if error_details:
-                    st.error(f"Startup details: {error_details}")
-            for dep, status in checks.items():
-                icon = "🟢" if status in ("ok", "configured") else "🔴"
-                st.markdown(f"{icon} **{dep}**: {status}")
-        if st.button("🔄 Recheck"):
-            st.session_state.health_status = _run_health_check()
-            st.rerun()
-        st.markdown("---")
+    #     # ── MCP Server Status ──────────────────────────────
+    #     health = st.session_state.get("health_status")
+    #     if health is None:
+    #         st.error("⛔ MCP Server unreachable — tool calls will fail.")
+    #     else:
+    #         data = health.get("data") or {}
+    #         checks = data.get("checks", {})
+    #         if health.get("success"):
+    #             st.success("✅ Server ready")
+    #         else:
+    #             st.warning("⚠️ Server degraded")
+    #             error_details = health.get("error")
+    #             if error_details:
+    #                 st.error(f"Startup details: {error_details}")
+    #         for dep, status in checks.items():
+    #             icon = "🟢" if status in ("ok", "configured") else "🔴"
+    #             st.markdown(f"{icon} **{dep}**: {status}")
+    #     if st.button("🔄 Recheck"):
+    #         st.session_state.health_status = _run_health_check()
+    #         st.rerun()
+    #     st.markdown("---")
 
-        if st.button("🗑️ Clear Conversation"):
-            try:
-                st.session_state.conversation_history = []
-                st.session_state.messages = []
-                st.session_state.user_input = ""
-                st.session_state.last_input = ""
-                st.rerun()
-            except StreamlitAPIException as error:
-                handle_ui_error(error, "The conversation could not be cleared.")
+    #     if st.button("🗑️ Clear Conversation"):
+    #         try:
+    #             st.session_state.conversation_history = []
+    #             st.session_state.messages = []
+    #             st.session_state.user_input = ""
+    #             st.session_state.last_input = ""
+    #             st.rerun()
+    #         except StreamlitAPIException as error:
+    #             handle_ui_error(error, "The conversation could not be cleared.")
 
     # Main content
     col_title, col_clear = st.columns([6, 1])
