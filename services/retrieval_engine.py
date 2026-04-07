@@ -57,6 +57,7 @@ class RetrievalEngine:
                         break
                 else:
                     docs.append(str(doc))
+            logger.info("Azure Search returned %d doc(s) for query: %s", len(docs), query[:100])
             return docs
         except Exception as e:
             logger.error("Error querying Azure Search: %s", e)

@@ -1,11 +1,14 @@
 """MAF tool functions that wrap MCP server calls for the Action Agent."""
 
+import logging
 from typing import Annotated
 from pydantic import Field
 
 from config.settings import tool
 from config.constants import LOOKUP_DISAMBIGUATE_PROMPT, LOOKUP_NEXT_ACTION_PROMPT
 from services.mcp_client import mcp_client
+
+logger = logging.getLogger(__name__)
 
 
 def _format_single_user(record: dict, fallback_username: str = "") -> str:
@@ -38,6 +41,7 @@ def lookup_user(
         args["last_name"] = last_name
     else:
         return "Please provide either a username or both a first name and last name to look up a user."
+    logger.info("lookup_user called with args: %s", args)
     try:
         result = mcp_client.call_tool("lookup_user", args)
         records = mcp_client.extract_records(result)
@@ -56,8 +60,11 @@ def lookup_user(
                 lines.append(f"\nMatch {i}:\n" + _format_single_user(record))
             lines.append(f"\n{LOOKUP_DISAMBIGUATE_PROMPT}")
             return "\n".join(lines)
-        return "User found:\n" + _format_single_user(data or {}, username)
+        result_text = "User found:\n" + _format_single_user(data or {}, username)
+        logger.info("lookup_user result: %s", result_text[:300])
+        return result_text
     except Exception as e:
+        logger.error("lookup_user failed: %s", e)
         return f"Error looking up user via MCP: {str(e)}"
 
 
@@ -78,6 +85,7 @@ def check_device_status(
             args["first_name"] = first_name
         if last_name:
             args["last_name"] = last_name
+        logger.info("check_device_status called with args: %s", args)
         result = mcp_client.call_tool("check_device_status", args)
         records = mcp_client.extract_records(result)
         envelope = records[0] if records else {}
@@ -86,7 +94,7 @@ def check_device_status(
         if not envelope.get("success"):
             return envelope.get("error") or "Device lookup failed."
         record = envelope.get("data") or {}
-        return (
+        result_text = (
             "Device status:\n\n"
             "Match 1:\n"
             f"- Device ID: {record.get('device_id', 'Unknown')}\n"
@@ -95,7 +103,10 @@ def check_device_status(
             f"- VPN Client: {record.get('vpn_client', 'Unknown')}\n"
             f"- Last Seen: {record.get('last_seen', 'Unknown')}"
         )
+        logger.info("check_device_status result: %s", result_text[:300])
+        return result_text
     except Exception as e:
+        logger.error("check_device_status failed: %s", e)
         return f"Error checking device status via MCP: {str(e)}"
 
 
@@ -106,6 +117,7 @@ def check_device_status(
 def lookup_ticket(
     ticket_id: Annotated[str, Field(description="The ticket ID or ticket number to look up")],
 ) -> str:
+    logger.info("lookup_ticket called with ticket_id: %s", ticket_id)
     try:
         result = mcp_client.call_tool("lookup_ticket", {"ticket_id": ticket_id})
         records = mcp_client.extract_records(result)
@@ -116,7 +128,7 @@ def lookup_ticket(
             return envelope.get("error") or "Ticket lookup failed."
         data = envelope.get("data") or {}
         full_name = " ".join(filter(None, [data.get("first_name"), data.get("last_name")])).strip() or "Unknown"
-        return (
+        result_text = (
             "Ticket details:\n"
             f"- Ticket ID: {data.get('ticket_id', 'Unknown')}\n"
             f"- Subject: {data.get('subject', 'Unknown')}\n"
@@ -129,7 +141,10 @@ def lookup_ticket(
             f"- User: {full_name}\n"
             f"- Email: {data.get('email', 'Unknown')}"
         )
+        logger.debug("lookup_ticket result: %s", result_text[:300])
+        return result_text
     except Exception as e:
+        logger.error("lookup_ticket failed: %s", e)
         return f"Error looking up ticket via MCP: {str(e)}"
 
 
@@ -142,6 +157,7 @@ def lookup_tickets_by_user(
     first_name: Annotated[str, Field(description="Employee first name. Use with last_name when username is unknown.")] = "",
     last_name: Annotated[str, Field(description="Employee last name. Use with first_name when username is unknown.")] = "",
 ) -> str:
+    logger.info("lookup_tickets_by_user called with username=%s, first_name=%s, last_name=%s", username, first_name, last_name)
     try:
         result = mcp_client.call_tool(
             "lookup_tickets_by_user",
@@ -174,6 +190,7 @@ def lookup_tickets_by_user(
             )
         return "\n".join(lines)
     except Exception as e:
+        logger.error("lookup_tickets_by_user failed: %s", e)
         return f"Error looking up tickets by user via MCP: {str(e)}"
 
 
@@ -193,6 +210,7 @@ def create_ticket(
     additional_cc_emails: Annotated[list[str], Field(description="Extra email addresses to CC on the ticket")] = [],
 ) -> str:
     """Create a ticket via MCP server tool."""
+    logger.info("create_ticket called for user=%s, category=%s, severity=%s", user, category, severity)
     try:
         result = mcp_client.call_tool(
             "create_ticket",
@@ -223,7 +241,10 @@ def create_ticket(
             f"Priority: {data.get('priority')}, "
             f"Assignment Group: {data.get('assignment_group')}"
         )
+        logger.info("create_ticket succeeded: %s", result_text)
+        return result_text
     except Exception as e:
+        logger.error("create_ticket failed: %s", e)
         return f"Error calling MCP ticket tool: {e}"
 
 

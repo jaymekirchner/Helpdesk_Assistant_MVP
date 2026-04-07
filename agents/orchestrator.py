@@ -109,8 +109,11 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
         logger.info("Passing %d doc(s) to KnowledgeAgent", len(docs))
         try:
             knowledge_response = await knowledge_agent.run(knowledge_prompt)
-            return knowledge_response.text.strip()
+            response_text = knowledge_response.text.strip()
+            logger.info("KnowledgeAgent response: %s", response_text[:500])
+            return response_text
         except Exception as e:
+            logger.error("KnowledgeAgent call failed: %s", e)
             return f"Knowledge base lookup failed: {e}"
 
     # ── Step 3b: Action Agent ─────────────────────────────────────
@@ -124,8 +127,11 @@ async def run_orchestrator(user_input: str, conversation_history: list) -> str:
                 if history_context else user_input
             )
             action_response = await action_agent.run(action_prompt)
-            return action_response.text.strip()
+            response_text = action_response.text.strip()
+            logger.info("ActionAgent response: %s", response_text[:500])
+            return response_text
         except Exception as e:
+            logger.error("ActionAgent call failed: %s", e)
             return f"Action execution failed: {e}"
 
     return "I was unable to process your request. Please try again."
