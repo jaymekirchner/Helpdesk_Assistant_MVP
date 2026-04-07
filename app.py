@@ -7,7 +7,7 @@ from services.mcp_client import mcp_client, MCPClient
 import logging
 
 logging.basicConfig(
-    level=logging.DEBUG,       # or logging.INFO to hide DEBUG-level messages
+    level=logging.INFO,       # or logging.INFO to hide DEBUG-level messages
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 
