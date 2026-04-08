@@ -64,12 +64,12 @@ TOOL_REQUEST_SIGNALS = [
     "escalate",
     "user",
     "username",
-    "name"
+    "name",
     "get user",
     "get username",
     "get tickets",
-    "ticket"
-    "device"
+    "ticket",
+    "device",
     # "check my device",
     # "check device for",
 ]

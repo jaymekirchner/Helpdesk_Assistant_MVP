@@ -36,6 +36,7 @@ from prompts.orchestrator import TICKET_CONTEXT_EXTRACTOR_SYSTEM, INPUT_SUMMARIZ
 from services.escalation_service import EscalationService
 from agents.agent_factory import action_agent
 from agents.orchestrator import run_orchestrator
+from agents.tool_registry import lookup_user as direct_lookup_user, check_device_status as direct_check_device
 from utils.conversation_detector import ConversationDetector
 
 escalation = EscalationService()
@@ -355,19 +356,23 @@ async def handle_user_message(user_input: str, conversation_history: list):
     if conversation_history and detector.last_assistant_asked_for_lookup_next_action(conversation_history):
         choice = user_input.strip().lower()
         username = detector.get_username_from_lookup_result(conversation_history)
-        if not action_agent:
-            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
+        device_id = detector.get_device_id_from_lookup_result(conversation_history)
         # If user says 'lookup ticket' or similar, trigger lookup_ticket flow
         if detector.looks_like_ticket_lookup_request(choice):
             # Ask for ticket number
             return TICKET_LOOKUP_NUMBER_PROMPT, True
         elif "device" in choice:
-            logger.info("Decision → CHECK DEVICE for username: %s", username)
-            device_prompt = f"Use check_device_status with '{username}'. Display the full device details."
-            action_response = await action_agent.run(device_prompt)
-            logger.info("ActionAgent response (device check): %s", action_response.text[:500])
-            return action_response.text, True
+            # Call the tool directly to avoid ActionAgent hallucination
+            lookup_key = device_id or username
+            if not lookup_key:
+                return "I couldn't determine the device or username from the previous lookup. Please try the lookup again.", True
+            logger.info("Decision → CHECK DEVICE (direct) for: %s", lookup_key)
+            result_text = direct_check_device(device_or_username=lookup_key)
+            logger.info("Direct device check result: %s", result_text[:500])
+            return result_text, True
         elif "ticket" in choice:
+            if not action_agent:
+                return "Action agent is unavailable because Azure OpenAI settings are missing.", True
             logger.info("Decision → CREATE TICKET for username: %s", username)
             history_context = "\n".join(
                 f"{m['role'].upper()}: {m['content']}"
@@ -390,16 +395,9 @@ async def handle_user_message(user_input: str, conversation_history: list):
         first_name = detector.get_first_name_from_lookup_history(conversation_history)
         if not first_name:
             return "I couldn't retrieve the first name. Please start the lookup again.", True
-        if not action_agent:
-            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        logger.info("Decision → LOOKUP by name: %s %s", first_name, last_name)
-        lookup_prompt = (
-            f"Use lookup_user with first_name='{first_name}' and last_name='{last_name}'. "
-            "Display all the user details returned."
-        )
-        action_response = await action_agent.run(lookup_prompt)
-        response_text = action_response.text
-        logger.info("ActionAgent response (name lookup): %s", response_text[:500])
+        logger.info("Decision → LOOKUP by name (direct): %s %s", first_name, last_name)
+        response_text = direct_lookup_user(first_name=first_name, last_name=last_name)
+        logger.info("Direct lookup result (name): %s", response_text[:500])
         error_indicators = ("error", "failed", "not found", "no user", "please provide")
         if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
@@ -413,16 +411,9 @@ async def handle_user_message(user_input: str, conversation_history: list):
     # Username received — username-based lookup
     if conversation_history and detector.last_assistant_asked_for_lookup_username(conversation_history):
         username = user_input.strip()
-        if not action_agent:
-            return "Action agent is unavailable because Azure OpenAI settings are missing.", True
-        logger.info("Decision → LOOKUP by username: %s", username)
-        lookup_prompt = (
-            f"Use lookup_user with username='{username}'. "
-            "Display all the user details returned."
-        )
-        action_response = await action_agent.run(lookup_prompt)
-        response_text = action_response.text
-        logger.info("ActionAgent response (username lookup): %s", response_text[:500])
+        logger.info("Decision → LOOKUP by username (direct): %s", username)
+        response_text = direct_lookup_user(username=username)
+        logger.info("Direct lookup result (username): %s", response_text[:500])
         error_indicators = ("error", "failed", "not found", "no user", "please provide")
         if not any(kw in response_text.lower() for kw in error_indicators):
             response_text = response_text.rstrip() + f"\n\n{LOOKUP_NEXT_ACTION_PROMPT}"
