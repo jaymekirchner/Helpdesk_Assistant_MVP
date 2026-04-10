@@ -140,6 +140,28 @@ TICKET_CONFIRMATION_SIGNALS = [
     "please do raise a ticket",
 ]
 
+END_CONVERSATION_SIGNALS = [
+    "good bye",
+    "bye",
+    "goodbye",
+    "see you",
+    "talk to you later",
+    "thanks, that's all",
+    "that's all for now",
+    "no, that's all",
+    "nothing else",
+    "no, nothing else",
+    "all done",
+    "all set",
+    "that's it",
+    "that's all",
+    "thank you, that's all",
+    "thank you, nothing else",
+    "thank you, no, that's all",
+    "thank you, that's all for now",
+    "thanks, nothing else"
+]
+
 # ── Conversation prompt strings ──────────────────────────────────────────────
 
 IDENTITY_LOOKUP_PROMPT = (
