@@ -95,48 +95,6 @@ def _guard(value: str, field_name: str) -> str | None:
     return None
 
 
-# @mcp.tool
-# def health_check() -> dict:
-#     """Return server readiness status and connectivity checks for all dependencies."""
-#     checks = {}
-
-#     # Postgres
-#     conn_str = _postgres_conn_string()
-#     if conn_str:
-#         try:
-#             with psycopg2.connect(conn_str) as conn:
-#                 with conn.cursor() as cur:
-#                     cur.execute("SELECT 1")
-#             checks["postgres"] = "ok"
-#         except psycopg2.Error as e:
-#             checks["postgres"] = f"error: {e}"
-#     else:
-#         checks["postgres"] = "not configured"
-
-#     # Freshworks
-#     if os.getenv("FRESHWORKS_API_KEY") and os.getenv("FRESHWORKS_DOMAIN"):
-#         checks["freshworks"] = "configured"
-#     else:
-#         checks["freshworks"] = "not configured"
-
-#     # Azure OpenAI (translation)
-#     if _openai_client and _oai_deployment:
-#         checks["azure_openai"] = "configured"
-#     else:
-#         checks["azure_openai"] = "not configured"
-
-#     all_ok = all(v in ("ok", "configured") for v in checks.values())
-#     return {
-#         "success": all_ok,
-#         "error": None if all_ok else "One or more dependencies are unavailable",
-#         "data": {
-#             "status": "ready" if all_ok else "degraded",
-#             "checks": checks,
-#             "timestamp_utc": datetime.datetime.utcnow().isoformat(),
-#         },
-#     }
-
-
 def _postgres_conn_string() -> str:
     """Retrieve Postgres connection string from environment, or construct from components."""
     conn_str = os.getenv("AZURE_POSTGRESQL_CONNECTION_STRING", "")
