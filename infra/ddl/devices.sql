@@ -13,7 +13,6 @@ CREATE TABLE demo.devices (
 	last_seen timestamp DEFAULT CURRENT_DATE NULL,
 	CONSTRAINT devices_pkey PRIMARY KEY (device_id)
 );
-CREATE INDEX idx_deviceid_userid ON demo.devices USING btree (device_id, user_id);
 
 
 -- demo.devices foreign keys
